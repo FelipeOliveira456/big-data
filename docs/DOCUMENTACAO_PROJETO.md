@@ -1,143 +1,151 @@
 # Detecção Distribuída de Comunidades com Louvain
 
-## Documentação do Projeto — Código, Arquitetura e Uso Local
+## Documentação do Projeto — Código, Arquitetura e Uso
 
-**Projeto:** big-data / `001-distributed-louvain`  
-**Data:** 26 de maio de 2026  
-**Dataset:** soc-pokec (SNAP)  
-**Abordagens:** Ray (manual) vs Spark + GraphFrames (Apostol et al., 2024)
+**Repositório:** [FelipeOliveira456/big-data](https://github.com/FelipeOliveira456/big-data)  
+**Pacote Python:** `distributed-louvain`  
+**Dataset:** email-Enron (SNAP)  
+**Abordagens:** Ray (manual) vs Dask (manual)
 
 ---
 
 ## Sumário
 
 1. [Visão geral](#1-visão-geral)
-2. [Objetivos do trabalho](#2-objetivos-do-trabalho)
+2. [Objetivos](#2-objetivos)
 3. [O algoritmo de Louvain](#3-o-algoritmo-de-louvain)
-4. [Dataset soc-pokec](#4-dataset-soc-pokec)
+4. [Dataset email-Enron](#4-dataset-email-enron)
 5. [Arquitetura do software](#5-arquitetura-do-software)
 6. [Estrutura de diretórios](#6-estrutura-de-diretórios)
 7. [Módulos e responsabilidades](#7-módulos-e-responsabilidades)
 8. [Pré-processamento](#8-pré-processamento)
 9. [Implementação Ray](#9-implementação-ray)
-10. [Implementação Spark](#10-implementação-spark)
+10. [Implementação Dask](#10-implementação-dask)
 11. [Benchmark e relatórios](#11-benchmark-e-relatórios)
 12. [Interface de linha de comando](#12-interface-de-linha-de-comando)
-13. [Testes automatizados](#13-testes-automatizados)
-14. [Como executar no seu PC (10%)](#14-como-executar-no-seu-pc-10)
-15. [Decisões de engenharia](#15-decisões-de-engenharia)
-16. [Referências bibliográficas](#16-referências-bibliográficas)
+13. [Docker e cluster](#13-docker-e-cluster)
+14. [Testes e QA](#14-testes-e-qa)
+15. [Requisitos de hardware](#15-requisitos-de-hardware)
+16. [Decisões de engenharia](#16-decisões-de-engenharia)
+17. [Referências](#17-referências)
 
 ---
 
 ## 1. Visão geral
 
-Este projeto implementa e compara **duas variantes distribuídas** do algoritmo de **Louvain** para detecção de comunidades em grafos grandes:
+Este projeto implementa e compara **duas variantes distribuídas** do algoritmo de **Louvain** para detecção de comunidades:
 
 | Abordagem | Tecnologia | Descrição |
 |-----------|------------|-----------|
-| **Ray** | Python + Ray Core | Louvain implementado manualmente com tasks remotas e batches de nós |
-| **Spark** | PySpark + GraphFrames | Louvain via SQL/joins conforme Apostol et al. (2024) |
+| **Ray** | Python + Ray Core | Louvain manual com `@ray.remote` e batches de nós |
+| **Dask** | Python + Dask Distributed | Louvain manual com `Client.submit` e batches de nós |
 
-Ambas leem o **mesmo artefato Parquet** (arestas normalizadas) gerado por um único pipeline de pré-processamento, garantindo comparação justa.
+Ambas leem o **mesmo artefato Parquet** gerado por um único pipeline de pré-processamento, garantindo comparação justa de modularidade e número de comunidades.
+
+A lógica central (ΔQ, modularidade, compressão hierárquica) fica em `louvain_core/` — Ray e Dask são apenas camadas de paralelização da Fase 1.
 
 ---
 
-## 2. Objetivos do trabalho
+## 2. Objetivos
 
-1. Detectar comunidades na rede social eslovaca **soc-pokec** (~1,6M nós, ~30M arestas).
-2. Comparar **desempenho** (tempo, memória, throughput) e **qualidade** (modularidade Q, número de comunidades).
-3. Documentar trade-offs de **engenharia** (linhas de código, complexidade, infraestrutura).
-4. Fornecer **testes unitários** para fórmulas centrais (ΔQ, modularidade, pré-processamento).
+1. Detectar comunidades na rede **email-Enron** (~37k nós, ~184k arestas).
+2. Comparar **desempenho** (tempo, memória RSS, throughput) e **qualidade** (modularidade Q, número de comunidades).
+3. Executar em **VM free tier** (Oracle ARM, 4 OCPU / 24 GB) ou cluster de 4 VMs.
+4. Fornecer **testes unitários**, integração E2E e pipeline **Docker**.
 
 ---
 
 ## 3. O algoritmo de Louvain
 
-Referência: Blondel et al. (2008). O Louvain opera em dois estágios repetidos hierarquicamente:
+Referência: Blondel et al. (2008).
 
 ### Fase 1 — Otimização local
 
 - Cada nó começa na própria comunidade.
 - Para cada nó *i*, calcula-se o ganho **ΔQ** ao movê-lo para cada comunidade vizinha *C*:
 
-**ΔQ = (k_i_in / m) − (sigma_tot × k_i) / (2m²)**
+**ΔQ = (k_i_in / m) − (σ_tot × k_i) / (2m²)**
 
-onde *k_i_in* = peso das arestas de *i* para *C*, *sigma_tot* = soma dos graus em *C*, *k_i* = grau de *i*, *m* = soma total dos pesos / 2.
+onde *k_i_in* = peso das arestas de *i* para *C*, *σ_tot* = soma dos graus em *C*, *k_i* = grau de *i*, *m* = soma total dos pesos / 2.
 
-- O nó move-se para a comunidade com maior \(\Delta Q > 0\). Repete até estabilizar.
+- O nó move-se para a comunidade com maior ΔQ > 0. Repete até estabilizar (até 500 sweeps por nível).
 
 ### Fase 2 — Compressão
 
 - Cada comunidade vira um **super-nó**; arestas entre comunidades agregam pesos.
 - Reinicia Fase 1 no grafo comprimido.
 
-### Critério de parada (neste projeto)
+### Critério de parada
 
-Parar quando o ganho de modularidade **entre níveis hierárquicos** for menor que **ε** (padrão **1e-6**).
+Parar quando o ganho de modularidade **entre níveis hierárquicos** for menor que **ε** (padrão **1e-6**), implementado em `louvain_core/runner.py` (`should_stop_levels`).
 
 ### Modularidade Q
 
 **Q = (1/2m) × Σ_ij ( A_ij − (k_i × k_j)/(2m) ) × δ(c_i, c_j)**
 
-Valores típicos em redes sociais: 0,6–0,85. Acima de 0,3 indica estrutura comunitária relevante.
-
 ---
 
-## 4. Dataset soc-pokec
+## 4. Dataset email-Enron
 
 | Atributo | Valor |
 |----------|-------|
-| Fonte | [SNAP — soc-Pokec](https://snap.stanford.edu/data/soc-Pokec.html) |
-| Arquivo | `soc-pokec-relationships.txt` |
-| Nós (completo) | ~1.632.803 |
-| Arestas (completo) | ~30.622.564 |
-| Tipo | Direcionado no arquivo → tratado como **não direcionado** |
+| Fonte | [SNAP — email-Enron](https://snap.stanford.edu/data/email-Enron.html) |
+| Arquivo | `data/raw/email-Enron.txt` |
+| Nós (LCC, ~100%) | ~36.662 |
+| Arestas (LCC) | ~183.831 |
+| Tamanho raw | ~5 MB |
 
 ### Pré-processamento aplicado
 
-1. Remover cabeçalho e linhas inválidas.
-2. Ignorar direção: (u,v) = (v,u), manter `src < dst`.
+1. Ignorar cabeçalho e linhas inválidas.
+2. Grafo **não direcionado**: `(u,v) = (v,u)`, manter `src < dst`.
 3. Remover self-loops.
 4. Peso uniforme **1.0**.
-5. Subconjuntos experimentais: amostra **10%, 50%, 100%** dos nós (seed **42**).
+5. Subconjuntos experimentais: amostra **1%, 5%, 100%** dos nós (seed **42**).
 6. Subgrafo **induzido** + maior componente conexa (**LCC**).
-7. Exportar **Parquet** compartilhado (`src`, `dst`, `weight`).
+7. Exportar **Parquet** (`src`, `dst`, `weight`) + `.meta.json`.
 
-### Artefatos gerados (exemplo real)
+### Artefatos (exemplos medidos)
 
 | Fração | Nós | Arestas | Ficheiro |
 |--------|-----|---------|----------|
-| 10% | 100.590 | 219.221 | `data/artifacts/pokec_10pct.parquet` |
-| 50% | 748.291 | 5.576.858 | `data/artifacts/pokec_50pct.parquet` |
-| 100% | 1.632.803 | 22.301.964 | `data/artifacts/pokec_100pct.parquet` |
+| 1% | 336 | 4.353 | `email-enron_1pct.parquet` |
+| 5% | 1.684 | 28.197 | `email-enron_5pct.parquet` |
+| 100% | ~36.662 | ~183.831 | `email-enron_100pct.parquet` |
+
+Download:
+
+```bash
+bash scripts/download_dataset.sh
+```
 
 ---
 
 ## 5. Arquitetura do software
 
 ```text
-soc-pokec TXT (SNAP)
+email-Enron.txt (SNAP)
        |
        v
-preprocessing/  -->  Parquet (10%, 50%, 100%)
+preprocessing/  -->  Parquet (1%, 5%, 100%)
        |
    +---+---+---+
    |       |   |
    v       v   v
-ray_impl  louvain_core  spark_impl
-(Ray)     (formulas)    (Spark/GF)
+ray_impl  louvain_core  dask_impl
+ (Ray)    (fórmulas)     (Dask)
    |       |   |
    +---+---+---+
        v
-benchmark/  -->  CSV + Markdown
+benchmark/  -->  metrics_raw_<timestamp>.csv
+              -->  comparison_<timestamp>.md
 ```
 
 **Princípios:**
 
-- **Modularidade:** Ray e Spark não importam um ao outro.
-- **Código mínimo:** fórmulas Louvain centralizadas em `louvain_core/`.
-- **Legibilidade:** um módulo por responsabilidade.
+- Ray e Dask **não importam um ao outro**.
+- Fórmulas Louvain centralizadas em `louvain_core/`.
+- Um módulo por responsabilidade; config via `pyproject.toml` + `config.yaml`.
 
 ---
 
@@ -146,23 +154,25 @@ benchmark/  -->  CSV + Markdown
 ```text
 big-data/
 ├── src/
-│   ├── louvain_core/       # ΔQ, Q, compressão, Louvain sequencial
+│   ├── louvain_core/       # ΔQ, Q, compressão, hierarquia
 │   ├── preprocessing/      # SNAP → Parquet
 │   ├── ray_impl/           # Louvain distribuído Ray
-│   ├── spark_impl/         # Louvain GraphFrames
-│   ├── benchmark/          # Métricas e relatório
-│   ├── cli/                # Comandos main.py
-│   └── config.py           # Configuração YAML/env
+│   ├── dask_impl/          # Louvain distribuído Dask
+│   ├── benchmark/          # Métricas, CSV, relatório MD
+│   ├── cli/                # Entrypoint CLI
+│   └── config.py           # Config YAML + env vars
 ├── tests/
-│   ├── unit/               # pytest
-│   └── integration/
+│   ├── unit/               # pytest (~70 testes)
+│   └── integration/        # E2E Ray+Dask (parametrizado 1%, 5%)
 ├── data/
-│   ├── raw/                # TXT SNAP
-│   └── artifacts/          # Parquet por fração
-├── reports/                # CSV + comparison.md
-├── specs/001-distributed-louvain/  # Spec, plan, tasks
+│   ├── raw/                # email-Enron.txt (gitignored)
+│   └── artifacts/          # Parquet por fração (gitignored)
+├── reports/                # Saídas locais timestampadas (gitignored)
+├── scripts/                # download, docker, cluster, QA
 ├── docs/                   # Esta documentação
-├── pyproject.toml
+├── Dockerfile
+├── docker-compose.yml
+├── pyproject.toml          # dependências runtime + dev
 ├── config.yaml.example
 └── README.md
 ```
@@ -175,49 +185,50 @@ big-data/
 
 | Ficheiro | Função |
 |----------|--------|
-| `graph.py` | Grafo como lista de adjacência; propriedade `m` (peso total / 2) |
-| `delta_q.py` | Cálculo de ΔQ e melhor movimento por nó |
+| `graph.py` | Grafo como adjacência; propriedade `m` |
+| `delta_q.py` | ΔQ e melhor movimento por nó |
 | `modularity.py` | Modularidade Q |
-| `compress.py` | Fase 2: agregar comunidades em super-nós |
-| `runner.py` | Louvain sequencial completo (referência e testes) |
+| `compress.py` | Fase 2: super-nós |
+| `hierarchy.py` | Níveis hierárquicos; Q no grafo original |
+| `runner.py` | Louvain sequencial + `should_stop_levels` |
 
 ### `preprocessing/`
 
 | Ficheiro | Função |
 |----------|--------|
-| `load_snap.py` | Leitura streaming; SQLite em disco; export Parquet em batches |
-| `sample_lcc.py` | Amostragem de nós, subgrafo induzido, LCC (NetworkX) |
-| `write_artifact.py` | Escrita/leitura Parquet + `.meta.json` |
+| `load_snap.py` | Leitura streaming; SQLite temporário |
+| `sample_lcc.py` | Amostragem conectada, subgrafo induzido, LCC |
+| `write_artifact.py` | Parquet + `.meta.json` |
 | `validate_artifact.py` | Validação de schema |
 | `pipeline.py` | Orquestração `preprocess` |
 
 ### `ray_impl/louvain_ray.py`
 
-- `@ray.remote` `calcular_ganho_batch`: avalia movimentos para um batch de nós.
+- `@ray.remote calcular_ganho_batch`: avalia movimentos para um batch.
 - **Snapshot síncrono:** todos os workers usam a mesma partição; movimentos aplicados ao fim da rodada.
-- `ray.put` implícito via passagem de `adj` e `degree` (otimizável com Object Store explícito).
-- Mede `init_time_s` (ray.init) separado de `algorithm_time_s`.
+- Modo **local:** `ray.init(num_cpus=...)` — `null` = auto.
+- Modo **cluster:** `ray.init(address="ray://<head>:10001")` quando `ray_head_address` definido.
 
-### `spark_impl/`
+### `dask_impl/louvain_dask.py`
 
-| Ficheiro | Função |
-|----------|--------|
-| `session.py` | SparkSession + pacote GraphFrames |
-| `graph_loader.py` | Parquet → GraphFrame |
-| `louvain_spark.py` | Joins/groupBy para ΔQ; checkpoint a cada 2 níveis |
+- `client.submit(_batch_best_moves, ...)` por batch.
+- Modo **local:** `LocalCluster(n_workers=None)` — auto-detecta CPUs.
+- Modo **cluster:** `Client("tcp://<scheduler>:8786")` quando `dask_scheduler_address` definido.
+- `scatter` de adj/degree reutilizado entre sweeps do mesmo nível.
 
 ### `benchmark/`
 
 | Ficheiro | Função |
 |----------|--------|
-| `runner.py` | Campanha 3× runs × 2 abordagens × 3 frações → CSV |
-| `metrics.py` | tracemalloc (Ray) |
+| `runner.py` | Campanha N runs × 2 abordagens × frações → CSV |
+| `metrics.py` | tracemalloc + **psutil RSS** (driver + árvore de processos) |
+| `paths.py` | Timestamps `YYYYMMDDTHHMMSS` nos nomes de ficheiro |
 | `report.py` | Markdown comparativo (média ± desvio) |
 | `report_sections.py` | Texto sobre race conditions + referências |
 
 ### `cli/main.py`
 
-Subcomandos: `preprocess`, `louvain-ray`, `louvain-spark`, `benchmark`, `report`.
+Subcomandos: `preprocess`, `louvain-ray`, `louvain-dask`, `benchmark`, `report`.
 
 ---
 
@@ -225,21 +236,19 @@ Subcomandos: `preprocess`, `louvain-ray`, `louvain-spark`, `benchmark`, `report`
 
 ### Fluxo
 
-1. **Passagem 1:** percorrer o TXT e coletar IDs de nós únicos.
-2. **Por fração (10/50/100):**
-   - Amostrar `fraction_pct`% dos nós com `random.Random(seed)`.
-   - **Passagem 2:** inserir arestas (ambos endpoints no conjunto) em SQLite temporário.
-   - Se arestas ≤ 8M: LCC em memória (NetworkX) → Parquet.
-   - Se arestas > 8M (100%): streaming SQLite → Parquet (LCC ≈ grafo completo no SNAP).
+1. Coletar nós da LCC global do ficheiro SNAP.
+2. Por fração (1/5/100):
+   - Amostrar nós conectados com `random.Random(seed)`.
+   - Filtrar arestas (ambos endpoints no conjunto).
+   - Extrair LCC do subgrafo induzido.
+   - Escrever Parquet + metadados JSON.
 
 ### Comando
 
 ```bash
-python -m src.cli.main preprocess \
-  --input data/raw/soc-pokec-relationships.txt \
-  --output-dir data/artifacts \
-  --seed 42 \
-  --fractions 10,50,100
+python -m cli.main preprocess --fractions 100
+# ou frações múltiplas:
+python -m cli.main preprocess --fractions 1,5,100
 ```
 
 ### Schema Parquet
@@ -256,72 +265,86 @@ python -m src.cli.main preprocess \
 
 ### Paralelização (Fase 1)
 
-1. Dividir nós em batches (ex.: 500–2000).
+1. Dividir nós em batches (`ray_batch_size`, padrão **1000**).
 2. Lançar `calcular_ganho_batch.remote(...)` para cada batch.
-3. `ray.get(refs)` em lote (nunca um a um em loop).
-4. Aplicar todos os movimentos ao fim da rodada.
-5. Repetir até nenhum movimento.
+3. `ray.get(refs)` em lote.
+4. Aplicar movimentos ao fim da rodada.
+5. Repetir até estabilizar.
 
-### Race conditions (documentado)
+### Paralelismo efectivo
 
-Workers partilham o **mesmo snapshot** da partição. Conflitos no mesmo nó são esperados; o último movimento aplicado na rodada prevalece. O Louvain distribuído assim mesmo converge na prática.
+Número de batches = `ceil(n_nós / batch_size)`. Com **336 nós** e batch **500** → **1 batch** → quase sem paralelismo. Com **~37k nós** e batch **1000** → **~37 batches** → paralelismo real.
 
-### Comando local (10%)
+### Race conditions
+
+Workers partilham o **mesmo snapshot** da partição. Conflitos no mesmo nó são esperados; o último movimento aplicado na rodada prevalece.
+
+### Comando
 
 ```bash
-python -m src.cli.main louvain-ray \
-  --artifact data/artifacts/pokec_10pct.parquet \
-  --batch-size 2000 \
+python -m cli.main louvain-ray \
+  --artifact data/artifacts/email-enron_100pct.parquet \
+  --batch-size 1000 \
   --num-cpus 4
 ```
 
-Dashboard: http://localhost:8265
+Dashboard (modo local): http://localhost:8265
 
 ---
 
-## 10. Implementação Spark
+## 10. Implementação Dask
 
-Segue Apostol et al. (2024): Louvain **não é nativo** no GraphFrames; constrói-se com `join`, `groupBy`, `max_by` sobre DataFrames de arestas e comunidades.
+Mesma lógica de batches que Ray, via `Client.submit`.
 
-### Operações centrais
+### LocalCluster vs cluster remoto
 
-- `g.degrees` — graus dos nós.
-- Join arestas × comunidades do destino → k_i_in.
-- Agregação sigma_tot por comunidade.
-- Cálculo de `delta_q` e melhor comunidade por `src`.
-- **Checkpoint** em vértices a cada 2 níveis hierárquicos (evita StackOverflow).
+| Config | Comportamento |
+|--------|---------------|
+| `dask_scheduler_address: null` | Cria `LocalCluster` na máquina |
+| `dask_n_workers: null` | Auto (≈ CPUs disponíveis) |
+| `dask_scheduler_address: 10.0.0.5:8786` | Conecta ao scheduler remoto |
 
-### Comando local (10%)
+### Comando
 
 ```bash
-export PYSPARK_SUBMIT_ARGS="--packages graphframes:graphframes:0.8.3-spark3.5-s_2.12 pyspark-shell"
-export SPARK_CHECKPOINT_DIR=/tmp/spark_checkpoints
-mkdir -p "$SPARK_CHECKPOINT_DIR"
-
-python -m src.cli.main louvain-spark \
-  --artifact data/artifacts/pokec_10pct.parquet
+python -m cli.main louvain-dask \
+  --artifact data/artifacts/email-enron_100pct.parquet \
+  --batch-size 1000 \
+  --n-workers 4
 ```
 
-Spark UI: http://localhost:4040
-
-**Nota:** na primeira execução o Maven baixa o JAR do GraphFrames (pode demorar).
+Dashboard (LocalCluster): http://localhost:8787
 
 ---
 
 ## 11. Benchmark e relatórios
 
-### CSV (`reports/metrics_raw.csv`)
+### CSV (`reports/metrics_raw_YYYYMMDDTHHMMSS.csv`)
 
-Colunas: `approach`, `fraction_pct`, `run_index`, tempos, memória, throughput, `modularity_q`, `num_communities`, `epsilon`, `seed`, `converged`, `status`, `level_times_json`.
+Colunas principais:
 
-### Markdown (`reports/comparison.md`)
+| Coluna | Descrição |
+|--------|-----------|
+| `approach` | `ray` ou `dask` |
+| `fraction_pct` | 1, 5, 100, … |
+| `init_time_s` | Tempo de `ray.init` / criação do cluster |
+| `algorithm_time_s` | Tempo do algoritmo |
+| `peak_driver_rss_mb` | RSS do processo driver |
+| `peak_process_tree_rss_mb` | RSS driver + workers filhos |
+| `modularity_q` | Modularidade final |
+| `num_communities` | Comunidades no grafo original |
+| `level_times_json` | Tempos por nível hierárquico |
 
-Tabelas média ± desvio padrão; secções Desempenho, Qualidade, Engenharia; discussão de race conditions Ray.
+### Markdown (`reports/comparison_YYYYMMDDTHHMMSS.md`)
+
+Tabelas média ± desvio; secções Desempenho, Qualidade, Engenharia.
 
 ```bash
-python -m src.cli.main benchmark --runs 3
-python -m src.cli.main report
+python -m cli.main benchmark --fractions 100 --runs 3
+python -m cli.main report
 ```
+
+O `report` emparelha automaticamente o CSV mais recente (via `latest_run.txt` ou timestamp).
 
 ---
 
@@ -329,84 +352,146 @@ python -m src.cli.main report
 
 | Comando | Descrição |
 |---------|-----------|
-| `preprocess` | TXT SNAP → Parquet 10/50/100% |
-| `louvain-ray` | Executa Louvain Ray num artefato |
-| `louvain-spark` | Executa Louvain Spark num artefato |
-| `benchmark` | Campanha completa de medições |
+| `preprocess` | TXT SNAP → Parquet por fração |
+| `louvain-ray` | Louvain Ray num artefato |
+| `louvain-dask` | Louvain Dask num artefato |
+| `benchmark` | Campanha completa (N runs × 2 abordagens) |
 | `report` | Gera Markdown a partir do CSV |
 
-Variáveis de ambiente: `POKEC_RAW_PATH`, `ARTIFACT_DIR`, `SEED`, `EPSILON`, `RAY_NUM_CPUS`.
+### Configuração (`config.yaml` / env vars)
 
----
+| Chave / env | Padrão | Descrição |
+|-------------|--------|-----------|
+| `graph_raw_path` / `GRAPH_RAW_PATH` | `data/raw/email-Enron.txt` | Ficheiro SNAP |
+| `dataset_slug` | `email-enron` | Prefixo dos artefatos |
+| `seed` / `SEED` | `42` | Semente |
+| `epsilon` / `EPSILON` | `1e-6` | Parada entre níveis |
+| `ray_num_cpus` / `RAY_NUM_CPUS` | auto | CPUs Ray (local) |
+| `ray_batch_size` | `1000` | Nós por batch |
+| `dask_n_workers` / `DASK_N_WORKERS` | auto | Workers Dask (local) |
+| `ray_head_address` / `RAY_HEAD_ADDRESS` | — | Head Ray remoto |
+| `dask_scheduler_address` / `DASK_SCHEDULER_ADDRESS` | — | Scheduler Dask remoto |
 
-## 13. Testes automatizados
+Pipeline completo no host:
 
 ```bash
-pytest tests/unit/ -v
-pytest tests/integration/ -v
+bash scripts/run_all.sh   # requer venv em .venv
 ```
 
-| Teste | Cobre |
-|-------|--------|
-| `test_modularity.py` | Cálculo de Q |
-| `test_delta_q.py` | Melhor movimento ΔQ |
-| `test_compress.py` | Agregação Fase 2 |
-| `test_preprocess.py` | Normalização, LCC, Parquet |
-| `test_stop_epsilon.py` | Parada por ε |
-| `test_edge_cases.py` | Grafos vazios / isolados |
+---
+
+## 13. Docker e cluster
+
+### Single host
+
+```bash
+docker build -t distributed-louvain:latest .
+docker compose --profile single up
+```
+
+O entrypoint (`scripts/docker-entrypoint.sh`) executa:
+
+1. Download do dataset (se necessário)
+2. `preprocess --fractions 100`
+3. `benchmark --fractions 100 --runs 3`
+4. `report`
+
+Volumes: `./data`, `./reports`, `config.yaml.example` → `/app/config.yaml`.
+
+**Defaults Docker:** `ray_num_cpus` e `dask_n_workers` em **auto** (null); `batch_size` **1000**.
+
+### Cluster 4 VMs Oracle ARM
+
+```bash
+export HEAD_IP=<IP_PRIVADO_VM1>
+bash scripts/start-cluster.sh
+```
+
+Imprime comandos `docker run` por VM (ray-head, dask-scheduler, workers, pipeline).
+
+Portas na Security List: **6379**, **10001**, **8786**, **8787**.
 
 ---
 
-## 14. Como executar no seu PC (10%)
+## 14. Testes e QA
 
-### Pré-requisitos
+### Setup
 
 ```bash
-cd /caminho/para/big-data
-python -m venv .venv && source .venv/bin/activate
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-### RAM orientativa
+Dependências definidas em `pyproject.toml` (`[project]` + `[optional-dependencies] dev`).
 
-| Algoritmo | 10% (~100k nós) |
-|-----------|-----------------|
-| Ray | 4–8 GB |
-| Spark | 8–12 GB |
+### Testes
 
-### Passo a passo
+```bash
+pytest tests/unit/ -v                           # ~70 testes, segundos
+pytest tests/integration/ -v -m integration     # E2E 1% e 5%, minutos
+```
 
-1. Confirmar artefato: `ls data/artifacts/pokec_10pct.parquet`
-2. Rodar Ray (minutos a ~30 min conforme CPU).
-3. Rodar Spark **depois** (não em paralelo com Ray).
-4. Comparar JSON de saída (Q, tempos, comunidades).
+E2E grava em `tests/integration/output/benchmark/` (não toca em `reports/`).
+
+Testes de cluster (`test_ray_cluster_mode.py`, `test_dask_cluster_mode.py`) usam **mocks** — não requerem VMs.
+
+### QA
+
+```bash
+make qa-check    # ruff + pylint + bandit
+make qa          # + pytest+coverage + mutmut → reports/qa_<timestamp>.md
+```
+
+`make qa` tem **exit 0 sempre** — relatório informativo, não gate de CI.
 
 ---
 
-## 15. Decisões de engenharia
+## 15. Requisitos de hardware
+
+### Dataset 100% Enron
+
+| VM | Viável? | Notas |
+|----|---------|-------|
+| **4 OCPU / 24 GB** (Oracle free tier) | **Sim** | ~4–12 GB RSS estimado; benchmark completo leva **horas** |
+| **1 OCPU / 6 GB** | Apertado | RAM e tempo limitados |
+| **~4 GB RAM** (dev local) | Não recomendado | 1% ok; 5%+ benchmark pode não terminar |
+
+### Estimativa a partir de medições (1%, 2 workers, batch 500)
+
+| | Ray | Dask |
+|---|-----|------|
+| Tempo algo | ~101 s | ~153 s |
+| RSS total | ~770 MB | ~448 MB |
+| Nós | 336 | 336 |
+
+Extrapolação para 100%: tempo **muito pior que linear** (mais níveis Louvain); ordem de **2–6 h por run** × 3 runs × 2 abordagens no single host.
+
+---
+
+## 16. Decisões de engenharia
 
 | Decisão | Motivo |
 |---------|--------|
-| Python vs Java (constituição original) | Ray/Spark/Python exigidos pelo trabalho académico |
-| Parquet compartilhado | Mesmo input para Ray e Spark |
-| SQLite no pré-processamento | Evitar OOM com 30M arestas |
+| email-Enron em vez de Pokec | Cabe em VM free tier; comparação Ray vs Dask sem JVM/Spark |
+| Dask manual (não GraphFrames) | Mesma lógica que Ray; comparação justa de runtime Python |
+| Parquet compartilhado | Mesmo input para Ray e Dask |
 | `louvain_core` compartilhado | Evitar duplicar fórmulas |
-| LCC após amostragem | Reduzir ruído de nós isolados |
-| ε = 1e-6 | Estabilidade numérica entre níveis |
-| Streaming no 100% | Grafo completo não cabe em RAM para NetworkX |
+| Snapshot síncrono por rodada | Simplicidade; trade-off documentado (race conditions) |
+| RSS via psutil | Medir workers filhos, não só heap Python |
+| Relatórios timestampados | Evitar sobrescrever runs anteriores |
+| `dask_n_workers: null` | Paridade com Ray auto-detect |
+| Docker single + cluster script | Demo local vs Oracle ARM sem Swarm |
 
 ---
 
-## 16. Referências bibliográficas
+## 17. Referências
 
 1. Blondel, V. D. et al. (2008). Fast unfolding of communities in large networks. *J. Stat. Mech.* P10008.
-2. Apostol, E.-S., Cojocaru, A.-C., Truică, C.-O. (2024). Large-Scale Graphs Community Detection using Spark GraphFrames. IEEE ISPDC. [arXiv:2408.03966](https://arxiv.org/abs/2408.03966)
-3. Leskovec, J., Krevl, A. (2014). SNAP Datasets. https://snap.stanford.edu/data
-4. Moritz, P. et al. (2018). Ray: A Distributed Framework for Emerging AI Applications. OSDI.
-5. Dave, A. et al. (2016). GraphFrames: An Integrated API for Mixing Graph and Relational Queries.
-6. Documentação Ray: https://docs.ray.io/en/latest/ray-core/walkthrough.html
-7. GraphFrames: https://github.com/graphframes/graphframes
+2. Leskovec, J., Krevl, A. (2014). SNAP Datasets. https://snap.stanford.edu/data
+3. Moritz, P. et al. (2018). Ray: A Distributed Framework for Emerging AI Applications. OSDI.
+4. Dask documentation: https://docs.dask.org/
+5. Documentação Ray: https://docs.ray.io/
 
 ---
 
-*Documento gerado automaticamente a partir do código e especificações em `specs/001-distributed-louvain/`.*
+*Documentação alinhada ao código em `main` — Junho 2026.*

@@ -4,11 +4,9 @@ Trabalho de Big Data: detecção de comunidades com Louvain distribuído — **R
 
 **Dataset:** [email-Enron](https://snap.stanford.edu/data/email-Enron.html) (~37k nós, ~184k arestas) — cabe em VM free tier (24 GB).
 
-## Documentação (PDF)
+## Documentação
 
-**[docs/DOCUMENTACAO_PROJETO.pdf](docs/DOCUMENTACAO_PROJETO.pdf)** — explicação completa do código, arquitetura, Louvain, Ray vs Dask e uso local.
-
-Fonte Markdown: [docs/DOCUMENTACAO_PROJETO.md](docs/DOCUMENTACAO_PROJETO.md)
+**[docs/DOCUMENTACAO_PROJETO.md](docs/DOCUMENTACAO_PROJETO.md)** — explicação completa do código, arquitetura, Louvain, Ray vs Dask, Docker, cluster e uso local.
 
 ---
 
