@@ -1,0 +1,10 @@
+{
+  "fraction_pct": 5,
+  "seed": 42,
+  "source": "/home/felipe/Documents/BIG-DATA/big-data/data/raw/email-Enron.txt",
+  "created_at": "2026-06-14T00:06:03.124629+00:00",
+  "node_count": 1684,
+  "edge_count": 28197,
+  "dropped_nodes_lcc": 0,
+  "lcc_skipped": false
+}

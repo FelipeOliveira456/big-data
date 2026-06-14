@@ -1,0 +1,13 @@
+services:
+  louvain:
+    build: .
+    profiles: ["single"]
+    environment:
+      CONTAINER_ROLE: pipeline
+      GRAPH_RAW_PATH: /app/data/raw/email-Enron.txt
+      DATASET_SLUG: email-enron
+      SEED: "42"
+    volumes:
+      - ./data:/app/data
+      - ./reports:/app/reports
+      - ./config.yaml.example:/app/config.yaml:ro
