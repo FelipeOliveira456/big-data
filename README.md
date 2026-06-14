@@ -16,7 +16,7 @@ Fonte Markdown: [docs/DOCUMENTACAO_PROJETO.md](docs/DOCUMENTACAO_PROJETO.md)
 
 | Modo | O que precisa |
 |------|----------------|
-| **Desenvolvimento / CLI / QA** | Python **3.11+**, venv, `requirements.txt` |
+| **Desenvolvimento / CLI / QA** | Python **3.11+**, venv, deps em `pyproject.toml` |
 | **Docker (single host)** | Docker ≥ 24, Compose plugin — **não** precisa de venv no host |
 | **Cluster Oracle (4 VMs)** | Docker em cada VM + Security List com portas 6379, 10001, 8786, 8787 |
 | **Testes E2E** | venv + dataset Enron (download automático nos scripts) |
@@ -24,6 +24,8 @@ Fonte Markdown: [docs/DOCUMENTACAO_PROJETO.md](docs/DOCUMENTACAO_PROJETO.md)
 ---
 
 ## Setup (venv) — obrigatório para QA e CLI local
+
+Dependências de runtime e dev ficam no **`pyproject.toml`** (`[project]` e `[project.optional-dependencies] dev`). Não há `requirements.txt` separado.
 
 O **`make qa`** e os comandos `python -m cli.main` rodam **no host**, dentro do venv. O Docker **não** usa o venv do host.
 
@@ -33,23 +35,14 @@ python3.11 -m venv .venv
 source .venv/bin/activate          # Linux/macOS
 # .venv\Scripts\activate           # Windows
 
-# 2. Instalar dependências pinadas + projeto em modo editável
+# 2. Instalar projeto + ferramentas de dev (ruff, pytest, mutmut, etc.)
 pip install --upgrade pip
-pip install -r requirements.txt
-pip install -e .
+pip install -e ".[dev]"
 
-# Alternativa equivalente (sem requirements.txt):
-# pip install -e ".[dev]"
+# ou: make install
 
 # 3. Config opcional
 cp config.yaml.example config.yaml   # ajuste paths se necessário
-```
-
-**Regenerar `requirements.txt`** (após mudar `pyproject.toml`):
-
-```bash
-pip install pip-tools
-pip-compile pyproject.toml --extra dev -o requirements.txt
 ```
 
 ---
@@ -66,7 +59,7 @@ make qa          # completo: ruff, pylint, bandit, pytest+coverage, mutmut
                  # exit code sempre 0 — relatório informativo, não é gate de CI
 ```
 
-O script `scripts/run_qa.sh` ativa `.venv` automaticamente se existir, mas **as ferramentas precisam estar instaladas no venv** (`pip install -r requirements.txt`).
+O script `scripts/run_qa.sh` ativa `.venv` automaticamente se existir, mas **as ferramentas precisam estar instaladas no venv** (`pip install -e ".[dev]"`).
 
 ---
 
@@ -109,7 +102,7 @@ Arquivos em `reports/` são gitignored. Testes E2E gravam em `tests/integration/
 
 ## Docker (single host)
 
-**Não usa venv do host.** A imagem instala deps via `pip install .` no build.
+**Não usa venv do host.** A imagem instala deps via `pip install .` no build (lê `pyproject.toml`).
 
 ```bash
 docker build -t distributed-louvain:latest .
@@ -169,4 +162,5 @@ tests/integration/
 data/artifacts/       # grafos Parquet (gitignored)
 reports/              # saídas locais (gitignored)
 scripts/              # download, docker, cluster, QA
+pyproject.toml        # dependências runtime + dev
 ```
