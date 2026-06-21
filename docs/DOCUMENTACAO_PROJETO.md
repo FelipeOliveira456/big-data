@@ -1,11 +1,11 @@
-# Detecção Distribuída de Comunidades com Louvain
+# Detecção Distribuída de Comunidades com Label Propagation
 
 ## Documentação do Projeto — Código, Arquitetura e Uso
 
 **Repositório:** [FelipeOliveira456/big-data](https://github.com/FelipeOliveira456/big-data)  
-**Pacote Python:** `distributed-louvain`  
-**Dataset:** email-Enron (SNAP)  
-**Abordagens:** Ray (manual) vs Dask (manual)
+**Pacote Python:** `distributed-lpa`  
+**Dataset:** soc-Pokec (SNAP, grafo direcionado)  
+**Abordagens:** Ray vs Dask (LPA síncrono distribuído)
 
 ---
 
@@ -13,17 +13,17 @@
 
 1. [Visão geral](#1-visão-geral)
 2. [Objetivos](#2-objetivos)
-3. [O algoritmo de Louvain](#3-o-algoritmo-de-louvain)
-4. [Dataset email-Enron](#4-dataset-email-enron)
+3. [O algoritmo LPA](#3-o-algoritmo-lpa)
+4. [Dataset soc-Pokec](#4-dataset-soc-pokec)
 5. [Arquitetura do software](#5-arquitetura-do-software)
 6. [Estrutura de diretórios](#6-estrutura-de-diretórios)
 7. [Módulos e responsabilidades](#7-módulos-e-responsabilidades)
-8. [Pré-processamento](#8-pré-processamento)
+8. [Carga do grafo](#8-carga-do-grafo)
 9. [Implementação Ray](#9-implementação-ray)
 10. [Implementação Dask](#10-implementação-dask)
 11. [Benchmark e relatórios](#11-benchmark-e-relatórios)
 12. [Interface de linha de comando](#12-interface-de-linha-de-comando)
-13. [Docker e cluster](#13-docker-e-cluster)
+13. [Docker (1 VM)](#13-docker-1-vm)
 14. [Testes e QA](#14-testes-e-qa)
 15. [Requisitos de hardware](#15-requisitos-de-hardware)
 16. [Decisões de engenharia](#16-decisões-de-engenharia)
@@ -33,90 +33,90 @@
 
 ## 1. Visão geral
 
-Este projeto implementa e compara **duas variantes distribuídas** do algoritmo de **Louvain** para detecção de comunidades:
+Este projeto implementa e compara **duas variantes distribuídas** de **Label Propagation (LPA)** para detecção de comunidades:
 
 | Abordagem | Tecnologia | Descrição |
 |-----------|------------|-----------|
-| **Ray** | Python + Ray Core | Louvain manual com `@ray.remote` e batches de nós |
-| **Dask** | Python + Dask Distributed | Louvain manual com `Client.submit` e batches de nós |
+| **Ray** | Python + Ray Core | LPA com `@ray.remote` e chunks de índices |
+| **Dask** | Python + Dask Distributed | LPA com `Client.submit` e chunks de índices |
 
-Ambas leem o **mesmo artefato Parquet** gerado por um único pipeline de pré-processamento, garantindo comparação justa de modularidade e número de comunidades.
+Ambas leem o **mesmo grafo** — carregado do ficheiro SNAP ou de um fixture `.npz` — garantindo comparação justa de modularidade e número de comunidades.
 
-A lógica central (ΔQ, modularidade, compressão hierárquica) fica em `louvain_core/` — Ray e Dask são apenas camadas de paralelização da Fase 1.
+A lógica central (iteração LPA, modularidade Q) fica em `lpa_core/` e `graph/`. Ray e Dask são camadas de paralelização do loop síncrono na **mesma VM**.
 
 ---
 
 ## 2. Objetivos
 
-1. Detectar comunidades na rede **email-Enron** (~37k nós, ~184k arestas).
+1. Detectar comunidades na rede **soc-Pokec** (~1,63M nós LCC, ~22M arestas direcionadas).
 2. Comparar **desempenho** (tempo, memória RSS, throughput) e **qualidade** (modularidade Q, número de comunidades).
-3. Executar em **VM free tier** (Oracle ARM, 4 OCPU / 24 GB) ou cluster de 4 VMs.
+3. Executar numa **única VM** (local ou Docker); integração E2E usa fixture **0,1%** (~1,6k nós).
 4. Fornecer **testes unitários**, integração E2E e pipeline **Docker**.
 
 ---
 
-## 3. O algoritmo de Louvain
+## 3. O algoritmo LPA
 
-Referência: Blondel et al. (2008).
+Referência: Raghavan, Albert & Kumara (2007).
 
-### Fase 1 — Otimização local
+### Regra de atualização
 
-- Cada nó começa na própria comunidade.
-- Para cada nó *i*, calcula-se o ganho **ΔQ** ao movê-lo para cada comunidade vizinha *C*:
-
-**ΔQ = (k_i_in / m) − (σ_tot × k_i) / (2m²)**
-
-onde *k_i_in* = peso das arestas de *i* para *C*, *σ_tot* = soma dos graus em *C*, *k_i* = grau de *i*, *m* = soma total dos pesos / 2.
-
-- O nó move-se para a comunidade com maior ΔQ > 0. Repete até estabilizar (até 500 sweeps por nível).
-
-### Fase 2 — Compressão
-
-- Cada comunidade vira um **super-nó**; arestas entre comunidades agregam pesos.
-- Reinicia Fase 1 no grafo comprimido.
+- Cada nó começa com um rótulo (permutação dos ids dos nós, reproduzível por `seed`).
+- Em cada iteração, cada nó adota o rótulo **mais frequente entre os vizinhos de saída** (peso da aresta soma votos).
+- Em empate, escolhe o **menor rótulo** (determinístico).
+- **Snapshot síncrono:** todos leem os rótulos do início da iteração e aplicam atualizações ao fim.
 
 ### Critério de parada
 
-Parar quando o ganho de modularidade **entre níveis hierárquicos** for menor que **ε** (padrão **1e-6**), implementado em `louvain_core/runner.py` (`should_stop_levels`).
+- Convergência quando **nenhum nó muda de rótulo** numa iteração, ou
+- `max_iter` atingido (padrão **50**).
+
+Não há número inicial de clusters *K* — o LPA descobre comunidades pelo consenso local.
 
 ### Modularidade Q
 
+Após as iterações, calcula-se **Q** (Blondel et al., 2008) sobre a partição final:
+
 **Q = (1/2m) × Σ_ij ( A_ij − (k_i × k_j)/(2m) ) × δ(c_i, c_j)**
+
+Implementação em `graph/modularity.py`.
 
 ---
 
-## 4. Dataset email-Enron
+## 4. Dataset soc-Pokec
 
 | Atributo | Valor |
 |----------|-------|
-| Fonte | [SNAP — email-Enron](https://snap.stanford.edu/data/email-Enron.html) |
-| Arquivo | `data/raw/email-Enron.txt` |
-| Nós (LCC, ~100%) | ~36.662 |
-| Arestas (LCC) | ~183.831 |
-| Tamanho raw | ~5 MB |
+| Fonte | [SNAP — soc-Pokec](https://snap.stanford.edu/data/soc-Pokec.html) |
+| Arquivo | `data/raw/soc-pokec-relationships.txt` |
+| Nós (LCC, ~100%) | ~1.632.803 |
+| Arestas direcionadas (LCC) | ~22,3M |
+| Tamanho raw | ~850 MB (descomprimido) |
 
-### Pré-processamento aplicado
+### Tratamento na carga
 
 1. Ignorar cabeçalho e linhas inválidas.
-2. Grafo **não direcionado**: `(u,v) = (v,u)`, manter `src < dst`.
-3. Remover self-loops.
-4. Peso uniforme **1.0**.
-5. Subconjuntos experimentais: amostra **1%, 5%, 100%** dos nós (seed **42**).
-6. Subgrafo **induzido** + maior componente conexa (**LCC**).
-7. Exportar **Parquet** (`src`, `dst`, `weight`) + `.meta.json`.
+2. Grafo **direcionado**: uma aresta `u → v` por linha do SNAP (A declara amizade com B).
+3. Remover self-loops e duplicatas `(src, dst)`.
+4. Grafos grandes: amostra **BFS conectada** por fração (seed **42**) sobre a LCC.
+5. Subgrafo **induzido**; construção **out-CSR** em memória (numpy).
 
-### Artefatos (exemplos medidos)
+Não há pipeline Parquet nem artefatos intermediários em produção — o benchmark lê o TXT diretamente.
 
-| Fração | Nós | Arestas | Ficheiro |
-|--------|-----|---------|----------|
-| 1% | 336 | 4.353 | `email-enron_1pct.parquet` |
-| 5% | 1.684 | 28.197 | `email-enron_5pct.parquet` |
-| 100% | ~36.662 | ~183.831 | `email-enron_100pct.parquet` |
+### Fixture de integração (0,1%)
 
-Download:
+| Atributo | Valor |
+|----------|-------|
+| Ficheiro | `tests/integration/fixtures/pokec_0p1pct.npz` |
+| Nós | 1.632 |
+| Arestas direcionadas | 3.910 |
+| Metadados | `pokec_0p1pct.meta.json` |
+
+Gerar com:
 
 ```bash
 bash scripts/download_dataset.sh
+bash scripts/build_integration_fixture.sh
 ```
 
 ---
@@ -124,28 +124,30 @@ bash scripts/download_dataset.sh
 ## 5. Arquitetura do software
 
 ```text
-email-Enron.txt (SNAP)
+soc-pokec-relationships.txt (SNAP)
        |
        v
-preprocessing/  -->  Parquet (1%, 5%, 100%)
+preprocessing/load_graph.py  -->  out-CSR em memória (Graph)
        |
    +---+---+---+
    |       |   |
    v       v   v
-ray_impl  louvain_core  dask_impl
- (Ray)    (fórmulas)     (Dask)
+lpa_ray  lpa_core  lpa_dask
+ (Ray)   + graph    (Dask)
    |       |   |
    +---+---+---+
        v
 benchmark/  -->  metrics_raw_<timestamp>.csv
+              -->  partitions_<timestamp>/
               -->  comparison_<timestamp>.md
 ```
 
 **Princípios:**
 
 - Ray e Dask **não importam um ao outro**.
-- Fórmulas Louvain centralizadas em `louvain_core/`.
-- Um módulo por responsabilidade; config via `pyproject.toml` + `config.yaml`.
+- Núcleo LPA e grafo **out-CSR** em `lpa_core/` + `graph/`.
+- Workers e chunks: **auto = número de CPUs** (`LPA_WORKERS` para fixar).
+- Config via `config.yaml` + variáveis de ambiente.
 
 ---
 
@@ -154,25 +156,25 @@ benchmark/  -->  metrics_raw_<timestamp>.csv
 ```text
 big-data/
 ├── src/
-│   ├── louvain_core/       # ΔQ, Q, compressão, hierarquia
-│   ├── preprocessing/      # SNAP → Parquet
-│   ├── ray_impl/           # Louvain distribuído Ray
-│   ├── dask_impl/          # Louvain distribuído Dask
+│   ├── lpa_core/           # LPA síncrono (núcleo puro)
+│   ├── graph/              # Grafo out-CSR + modularidade Q
+│   ├── preprocessing/      # SNAP → CSR em memória; fixtures .npz
+│   ├── ray_impl/           # LPA Ray
+│   ├── dask_impl/          # LPA Dask
 │   ├── benchmark/          # Métricas, CSV, relatório MD
 │   ├── cli/                # Entrypoint CLI
 │   └── config.py           # Config YAML + env vars
 ├── tests/
-│   ├── unit/               # pytest (~70 testes)
-│   └── integration/        # E2E Ray+Dask (parametrizado 1%, 5%)
+│   ├── unit/               # pytest (85 testes)
+│   └── integration/        # E2E Pokec 0,1% (fixture .npz)
 ├── data/
-│   ├── raw/                # email-Enron.txt (gitignored)
-│   └── artifacts/          # Parquet por fração (gitignored)
+│   └── raw/                # soc-pokec-relationships.txt (gitignored)
 ├── reports/                # Saídas locais timestampadas (gitignored)
-├── scripts/                # download, docker, cluster, QA
+├── scripts/                # download, docker, QA, fixture
 ├── docs/                   # Esta documentação
 ├── Dockerfile
 ├── docker-compose.yml
-├── pyproject.toml          # dependências runtime + dev
+├── pyproject.toml
 ├── config.yaml.example
 └── README.md
 ```
@@ -181,40 +183,44 @@ big-data/
 
 ## 7. Módulos e responsabilidades
 
-### `louvain_core/`
+### `graph/`
 
 | Ficheiro | Função |
 |----------|--------|
-| `graph.py` | Grafo como adjacência; propriedade `m` |
-| `delta_q.py` | ΔQ e melhor movimento por nó |
-| `modularity.py` | Modularidade Q |
-| `compress.py` | Fase 2: super-nós |
-| `hierarchy.py` | Níveis hierárquicos; Q no grafo original |
-| `runner.py` | Louvain sequencial + `should_stop_levels` |
+| `graph.py` | Grafo **out-CSR** (numpy): `node_ids`, `indptr`, `neighbors`; `from_edges`, `from_coo`, `from_csr_arrays` |
+| `modularity.py` | Modularidade Q sobre partição final |
+
+### `lpa_core/`
+
+| Ficheiro | Função |
+|----------|--------|
+| `lpa.py` | Iteração LPA, chunks, `run_lpa_sequential`, `LpaResult` |
+| `distributed.py` | Loop síncrono compartilhado Ray/Dask |
+| `worker_memory.py` | Pico RSS por worker (hostname) |
 
 ### `preprocessing/`
 
 | Ficheiro | Função |
 |----------|--------|
-| `load_snap.py` | Leitura streaming; SQLite temporário |
-| `sample_lcc.py` | Amostragem conectada, subgrafo induzido, LCC |
-| `write_artifact.py` | Parquet + `.meta.json` |
-| `validate_artifact.py` | Validação de schema |
-| `pipeline.py` | Orquestração `preprocess` |
+| `load_snap.py` | Leitura streaming do SNAP; COO direcionado |
+| `load_graph.py` | Orquestra carga TXT → out-CSR (pequeno em memória; grande com passagem streaming) |
+| `load.py` | Dispatch: `.npz` (fixture) ou SNAP |
+| `sample_lcc.py` | Amostragem BFS conectada, subgrafo induzido, LCC |
+| `graph_artifact.py` | Save/load fixtures `.npz` + `.meta.json` (integração) |
+| `fractions.py` | Helpers de frações percentuais |
 
-### `ray_impl/louvain_ray.py`
+### `ray_impl/lpa_ray.py`
 
-- `@ray.remote calcular_ganho_batch`: avalia movimentos para um batch.
-- **Snapshot síncrono:** todos os workers usam a mesma partição; movimentos aplicados ao fim da rodada.
-- Modo **local:** `ray.init(num_cpus=...)` — `null` = auto.
-- Modo **cluster:** `ray.init(address="ray://<head>:10001")` quando `ray_head_address` definido.
+- `@ray.remote lpa_chunk_remote`: uma iteração num chunk de índices.
+- Modo **local:** `ray.init(num_cpus=...)` na mesma VM.
+- Modo **cluster** (opcional): `ray.init(address="ray://<head>:10001")`.
+- Workers alinhados ao número de chunks (`lpa_chunk_divisor`).
 
-### `dask_impl/louvain_dask.py`
+### `dask_impl/lpa_dask.py`
 
-- `client.submit(_batch_best_moves, ...)` por batch.
-- Modo **local:** `LocalCluster(n_workers=None)` — auto-detecta CPUs.
-- Modo **cluster:** `Client("tcp://<scheduler>:8786")` quando `dask_scheduler_address` definido.
-- `scatter` de adj/degree reutilizado entre sweeps do mesmo nível.
+- `client.submit(lpa_iteration_chunk_tracked, ...)` por chunk.
+- Modo **local:** `LocalCluster(n_workers=...)` na mesma VM.
+- Modo **cluster** (opcional): `Client("tcp://<scheduler>:8786")`.
 
 ### `benchmark/`
 
@@ -222,70 +228,55 @@ big-data/
 |----------|--------|
 | `runner.py` | Campanha N runs × 2 abordagens × frações → CSV |
 | `metrics.py` | tracemalloc + **psutil RSS** (driver + árvore de processos) |
-| `paths.py` | Timestamps `YYYYMMDDTHHMMSS` nos nomes de ficheiro |
+| `partitions.py` | `summary.json` + `communities.json` (sem listas de nós > 50k) |
+| `memory_estimate.py` | Extrapolação tempo/RAM para 100% (calibração 0,1% e 10%) |
+| `seeds.py` | Seeds por run (`seed`, `seed+1`, … ou `BENCHMARK_SEEDS`) |
+| `vm_memory.py` | Pico RSS por hostname |
+| `paths.py` | Timestamps `YYYYMMDDTHHMMSS` |
 | `report.py` | Markdown comparativo (média ± desvio) |
-| `report_sections.py` | Texto sobre race conditions + referências |
 
 ### `cli/main.py`
 
-Subcomandos: `preprocess`, `louvain-ray`, `louvain-dask`, `benchmark`, `report`.
+Subcomandos: `lpa-ray`, `lpa-dask`, `benchmark`, `report`.
 
 ---
 
-## 8. Pré-processamento
+## 8. Carga do grafo
 
-### Fluxo
+### Fluxo (SNAP TXT)
 
 1. Coletar nós da LCC global do ficheiro SNAP.
-2. Por fração (1/5/100):
-   - Amostrar nós conectados com `random.Random(seed)`.
-   - Filtrar arestas (ambos endpoints no conjunto).
-   - Extrair LCC do subgrafo induzido.
-   - Escrever Parquet + metadados JSON.
+2. Por fração solicitada (0.1 / 1 / 10 / 100):
+   - Amostrar nós conectados com `random.Random(seed)` (BFS).
+   - Filtrar arestas direcionadas (ambos endpoints no conjunto).
+   - Construir **out-CSR** em memória.
+3. Grafos grandes (~850 MB): passagem streaming; sem materializar todas as arestas antes da amostra.
 
-### Comando
+### Fixture `.npz` (só testes)
 
-```bash
-python -m cli.main preprocess --fractions 100
-# ou frações múltiplas:
-python -m cli.main preprocess --fractions 1,5,100
-```
+Arrays CSR comprimidos + metadados JSON — carga em milissegundos para E2E.
 
-### Schema Parquet
+### Uso na CLI
 
-| Coluna | Tipo | Regra |
-|--------|------|-------|
-| src | int64 | menor endpoint |
-| dst | int64 | maior endpoint |
-| weight | float64 | 1.0 |
+O parâmetro `--input` aceita o TXT SNAP ou um `.npz`. A fração (`--fraction` / `--fractions`) aplica-se apenas ao TXT.
 
 ---
 
 ## 9. Implementação Ray
 
-### Paralelização (Fase 1)
+### Paralelização — chunks por índice
 
-1. Dividir nós em batches (`ray_batch_size`, padrão **1000**).
-2. Lançar `calcular_ganho_batch.remote(...)` para cada batch.
-3. `ray.get(refs)` em lote.
-4. Aplicar movimentos ao fim da rodada.
-5. Repetir até estabilizar.
-
-### Paralelismo efectivo
-
-Número de batches = `ceil(n_nós / batch_size)`. Com **336 nós** e batch **500** → **1 batch** → quase sem paralelismo. Com **~37k nós** e batch **1000** → **~37 batches** → paralelismo real.
-
-### Race conditions
-
-Workers partilham o **mesmo snapshot** da partição. Conflitos no mesmo nó são esperados; o último movimento aplicado na rodada prevalece.
+1. Particionar índices de nós em chunks ≈ `lpa_chunk_divisor` (padrão: **número de CPUs**).
+2. Cada iteração: `ray.put` do snapshot de rótulos; workers processam chunks em paralelo.
+3. Driver aplica atualizações e verifica convergência.
+4. Loop compartilhado em `lpa_core/distributed.py`.
 
 ### Comando
 
 ```bash
-python -m cli.main louvain-ray \
-  --artifact data/artifacts/email-enron_100pct.parquet \
-  --batch-size 1000 \
-  --num-cpus 4
+python -m cli.main lpa-ray \
+  --input data/raw/soc-pokec-relationships.txt \
+  --fraction 100
 ```
 
 Dashboard (modo local): http://localhost:8265
@@ -294,23 +285,22 @@ Dashboard (modo local): http://localhost:8265
 
 ## 10. Implementação Dask
 
-Mesma lógica de batches que Ray, via `Client.submit`.
+Mesma lógica de chunks e snapshot síncrono que Ray, via `Client.submit`.
 
-### LocalCluster vs cluster remoto
+### LocalCluster (padrão)
 
 | Config | Comportamento |
 |--------|---------------|
 | `dask_scheduler_address: null` | Cria `LocalCluster` na máquina |
-| `dask_n_workers: null` | Auto (≈ CPUs disponíveis) |
-| `dask_scheduler_address: 10.0.0.5:8786` | Conecta ao scheduler remoto |
+| `dask_n_workers: null` | Auto (= `lpa_chunk_divisor` / CPUs) |
+| `dask_scheduler_address: host:8786` | Conecta ao scheduler remoto (opcional) |
 
 ### Comando
 
 ```bash
-python -m cli.main louvain-dask \
-  --artifact data/artifacts/email-enron_100pct.parquet \
-  --batch-size 1000 \
-  --n-workers 4
+python -m cli.main lpa-dask \
+  --input data/raw/soc-pokec-relationships.txt \
+  --fraction 100
 ```
 
 Dashboard (LocalCluster): http://localhost:8787
@@ -326,25 +316,33 @@ Colunas principais:
 | Coluna | Descrição |
 |--------|-----------|
 | `approach` | `ray` ou `dask` |
-| `fraction_pct` | 1, 5, 100, … |
+| `fraction_pct` | 0.1, 1, 10, 100, … |
+| `seed` | Semente da run (42, 43, 44 em 3 runs) |
+| `graph_load_time_s` | Tempo TXT → CSR |
 | `init_time_s` | Tempo de `ray.init` / criação do cluster |
 | `algorithm_time_s` | Tempo do algoritmo |
 | `peak_driver_rss_mb` | RSS do processo driver |
 | `peak_process_tree_rss_mb` | RSS driver + workers filhos |
+| `peak_cluster_rss_mb` | Soma dos picos por hostname |
+| `vm_peaks_json` | Pico RSS por hostname |
 | `modularity_q` | Modularidade final |
-| `num_communities` | Comunidades no grafo original |
-| `level_times_json` | Tempos por nível hierárquico |
+| `num_communities` | Comunidades na partição final |
+| `level_times_json` | Tempos por iteração |
+| `communities_json` | Caminho do JSON legível de clusters |
+
+### Partições (`reports/partitions_<stamp>/`)
+
+- `*.summary.json` — métricas + caminhos
+- `*.communities.json` — clusters ordenados por tamanho (sem `node_ids` se n > 50k)
 
 ### Markdown (`reports/comparison_YYYYMMDDTHHMMSS.md`)
 
-Tabelas média ± desvio; secções Desempenho, Qualidade, Engenharia.
-
 ```bash
-python -m cli.main benchmark --fractions 100 --runs 3
+python -m cli.main benchmark --input data/raw/soc-pokec-relationships.txt --fractions 100 --runs 3
 python -m cli.main report
 ```
 
-O `report` emparelha automaticamente o CSV mais recente (via `latest_run.txt` ou timestamp).
+Com `--append`, reutiliza o stamp da run anterior (útil no Docker quando Ray e Dask rodam em sequência).
 
 ---
 
@@ -352,25 +350,28 @@ O `report` emparelha automaticamente o CSV mais recente (via `latest_run.txt` ou
 
 | Comando | Descrição |
 |---------|-----------|
-| `preprocess` | TXT SNAP → Parquet por fração |
-| `louvain-ray` | Louvain Ray num artefato |
-| `louvain-dask` | Louvain Dask num artefato |
-| `benchmark` | Campanha completa (N runs × 2 abordagens) |
+| `lpa-ray` | LPA Ray num grafo (TXT ou `.npz`) |
+| `lpa-dask` | LPA Dask num grafo |
+| `benchmark` | Campanha completa (N runs × abordagens) |
 | `report` | Gera Markdown a partir do CSV |
 
 ### Configuração (`config.yaml` / env vars)
 
 | Chave / env | Padrão | Descrição |
 |-------------|--------|-----------|
-| `graph_raw_path` / `GRAPH_RAW_PATH` | `data/raw/email-Enron.txt` | Ficheiro SNAP |
-| `dataset_slug` | `email-enron` | Prefixo dos artefatos |
-| `seed` / `SEED` | `42` | Semente |
-| `epsilon` / `EPSILON` | `1e-6` | Parada entre níveis |
+| `graph_raw_path` / `GRAPH_RAW_PATH` | `data/raw/soc-pokec-relationships.txt` | Ficheiro SNAP |
+| `dataset_slug` | `pokec` | Prefixo nos nomes de partição |
+| `seed` / `SEED` | `42` | Semente base (amostra + LPA) |
+| `lpa_max_iter` / `LPA_MAX_ITER` | `50` | Máximo de iterações |
+| `lpa_chunk_divisor` / `LPA_CHUNK_DIVISOR` | auto (CPUs) | Número de chunks por iteração |
+| `LPA_WORKERS` | — | Fixa workers e chunk divisor |
 | `ray_num_cpus` / `RAY_NUM_CPUS` | auto | CPUs Ray (local) |
-| `ray_batch_size` | `1000` | Nós por batch |
 | `dask_n_workers` / `DASK_N_WORKERS` | auto | Workers Dask (local) |
-| `ray_head_address` / `RAY_HEAD_ADDRESS` | — | Head Ray remoto |
-| `dask_scheduler_address` / `DASK_SCHEDULER_ADDRESS` | — | Scheduler Dask remoto |
+| `ray_head_address` / `RAY_HEAD_ADDRESS` | — | Head Ray remoto (opcional) |
+| `dask_scheduler_address` / `DASK_SCHEDULER_ADDRESS` | — | Scheduler Dask remoto (opcional) |
+| `BENCHMARK_RUNS` | `3` | Repetições por abordagem/fração |
+| `BENCHMARK_SEEDS` | `42,43,44` | Seeds explícitas (opcional) |
+| `BENCHMARK_STAMP` | auto | Stamp fixo para Ray+Dask no Docker |
 
 Pipeline completo no host:
 
@@ -380,36 +381,32 @@ bash scripts/run_all.sh   # requer venv em .venv
 
 ---
 
-## 13. Docker e cluster
+## 13. Docker (1 VM)
 
-### Single host
+Grafo e workers ficam na **mesma máquina**. Ray e Dask rodam em fases separadas (workers locais, 1 processo por CPU).
 
-```bash
-docker build -t distributed-louvain:latest .
-docker compose --profile single up
-```
-
-O entrypoint (`scripts/docker-entrypoint.sh`) executa:
-
-1. Download do dataset (se necessário)
-2. `preprocess --fractions 100`
-3. `benchmark --fractions 100 --runs 3`
-4. `report`
-
-Volumes: `./data`, `./reports`, `config.yaml.example` → `/app/config.yaml`.
-
-**Defaults Docker:** `ray_num_cpus` e `dask_n_workers` em **auto** (null); `batch_size` **1000**.
-
-### Cluster 4 VMs Oracle ARM
+### Build e execução
 
 ```bash
-export HEAD_IP=<IP_PRIVADO_VM1>
-bash scripts/start-cluster.sh
+docker build -t distributed-lpa:latest .
+bash scripts/run-docker.sh
+# ou:
+docker compose up --build
 ```
 
-Imprime comandos `docker run` por VM (ray-head, dask-scheduler, workers, pipeline).
+Volumes: `./data`, `./reports`. Config montada de `config.yaml.example`.
 
-Portas na Security List: **6379**, **10001**, **8786**, **8787**.
+### Variáveis (`docker-compose.yml`)
+
+| Variável | Default | Descrição |
+|----------|---------|-----------|
+| `GRAPH_RAW_PATH` | `data/raw/soc-pokec-relationships.txt` | Grafo SNAP |
+| `BENCHMARK_FRACTIONS` | `100` | Fração percentual (100 = grafo completo LCC) |
+| `BENCHMARK_RUNS` | `3` | Repetições |
+| `BENCHMARK_BACKEND` | `both` | `ray` → `dask` → `report` |
+| `LPA_WORKERS` | auto | CPUs do container |
+
+O entrypoint (`scripts/docker-entrypoint.sh`) gera um `BENCHMARK_STAMP` único, corre Ray, depois Dask com `--append`, e gera o relatório.
 
 ---
 
@@ -422,49 +419,48 @@ python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Dependências definidas em `pyproject.toml` (`[project]` + `[optional-dependencies] dev`).
-
 ### Testes
 
 ```bash
-pytest tests/unit/ -v                           # ~70 testes, segundos
-pytest tests/integration/ -v -m integration     # E2E 1% e 5%, minutos
+pytest tests/unit/ -v
+pytest tests/integration/ -m integration -v -s
+pytest tests/integration/test_lpa_pokec.py -m integration -v -s --backend ray
 ```
 
-E2E grava em `tests/integration/output/benchmark/` (não toca em `reports/`).
+E2E grava em `tests/integration/output/` (não toca em `reports/`).
 
-Testes de cluster (`test_ray_cluster_mode.py`, `test_dask_cluster_mode.py`) usam **mocks** — não requerem VMs.
+Fixture: `bash scripts/build_integration_fixture.sh` (requer raw Pokec).
 
 ### QA
 
 ```bash
 make qa-check    # ruff + pylint + bandit
-make qa          # + pytest+coverage + mutmut → reports/qa_<timestamp>.md
+make qa          # + pytest+coverage + mutmut
+# ou:
+bash scripts/run_qa.sh
 ```
-
-`make qa` tem **exit 0 sempre** — relatório informativo, não gate de CI.
 
 ---
 
 ## 15. Requisitos de hardware
 
-### Dataset 100% Enron
+### Grafo em memória (out-CSR numpy)
 
-| VM | Viável? | Notas |
-|----|---------|-------|
-| **4 OCPU / 24 GB** (Oracle free tier) | **Sim** | ~4–12 GB RSS estimado; benchmark completo leva **horas** |
-| **1 OCPU / 6 GB** | Apertado | RAM e tempo limitados |
-| **~4 GB RAM** (dev local) | Não recomendado | 1% ok; 5%+ benchmark pode não terminar |
+| Fração | Arestas direcionadas (~) | Pico driver (ordem de grandeza) |
+|--------|--------------------------|----------------------------------|
+| 0,1% | ~4k | dezenas de MB |
+| 1% | ~40k | ~100 MB |
+| 10% | ~1,9M | ~1 GB |
+| 100% | ~22M | ~2–4 GB (TXT → CSR) |
 
-### Estimativa a partir de medições (1%, 2 workers, batch 500)
+Carga grande usa passagem streaming sobre o TXT — evita duplicar o grafo inteiro em COO antes da amostra.
 
-| | Ray | Dask |
-|---|-----|------|
-| Tempo algo | ~101 s | ~153 s |
-| RSS total | ~770 MB | ~448 MB |
-| Nós | 336 | 336 |
+### VM recomendada (100% Pokec)
 
-Extrapolação para 100%: tempo **muito pior que linear** (mais níveis Louvain); ordem de **2–6 h por run** × 3 runs × 2 abordagens no single host.
+- **6–8 GB RAM** para benchmark completo Ray + Dask em sequência.
+- CPUs: quanto mais, mais chunks paralelos (auto-detectado).
+
+Estimativas detalhadas: `benchmark/memory_estimate.py` (calibrado com runs 0,1% e 10%).
 
 ---
 
@@ -472,26 +468,29 @@ Extrapolação para 100%: tempo **muito pior que linear** (mais níveis Louvain)
 
 | Decisão | Motivo |
 |---------|--------|
-| email-Enron em vez de Pokec | Cabe em VM free tier; comparação Ray vs Dask sem JVM/Spark |
-| Dask manual (não GraphFrames) | Mesma lógica que Ray; comparação justa de runtime Python |
-| Parquet compartilhado | Mesmo input para Ray e Dask |
-| `louvain_core` compartilhado | Evitar duplicar fórmulas |
-| Snapshot síncrono por rodada | Simplicidade; trade-off documentado (race conditions) |
-| RSS via psutil | Medir workers filhos, não só heap Python |
+| soc-Pokec direcionado | Grafo grande realista; arestas `u→v` como no SNAP |
+| out-CSR | Vizinhança O(grau) para propagação de rótulos |
+| Carga TXT → CSR em memória | Menos I/O e disco que pipeline Parquet intermediário |
+| LPA síncrono + snapshot | Mesmo modelo mental Ray/Dask; comparável e testável |
+| Chunks por índice (não BFS) | Topologia irrelevante para LPA |
+| `lpa_core` + `distributed.py` | Evitar duplicar loop Ray/Dask |
+| Workers = CPU count | Aproveitar a VM única sem config manual |
+| Fixtures `.npz` só em testes | E2E rápido sem re-ler 850 MB de TXT |
+| Partições JSON (sem Parquet) | Saída legível; `node_ids` omitidos se n > 50k |
+| RSS por hostname | Medir pico driver + árvore de processos |
 | Relatórios timestampados | Evitar sobrescrever runs anteriores |
-| `dask_n_workers: null` | Paridade com Ray auto-detect |
-| Docker single + cluster script | Demo local vs Oracle ARM sem Swarm |
+| Ray → Dask sequencial no Docker | Uma VM não aguenta dois clusters em paralelo |
 
 ---
 
 ## 17. Referências
 
-1. Blondel, V. D. et al. (2008). Fast unfolding of communities in large networks. *J. Stat. Mech.* P10008.
-2. Leskovec, J., Krevl, A. (2014). SNAP Datasets. https://snap.stanford.edu/data
-3. Moritz, P. et al. (2018). Ray: A Distributed Framework for Emerging AI Applications. OSDI.
-4. Dask documentation: https://docs.dask.org/
-5. Documentação Ray: https://docs.ray.io/
+1. Raghavan, U. N., Albert, R., & Kumara, S. (2007). Near linear time algorithm to detect community structures in large-scale networks. *Physical Review E*, 76(3), 036106.
+2. Blondel, V. D. et al. (2008). Fast unfolding of communities in large networks. *J. Stat. Mech.* P10008.
+3. Leskovec, J., Krevl, A. (2014). SNAP Datasets. https://snap.stanford.edu/data
+4. Moritz, P. et al. (2018). Ray: A Distributed Framework for Emerging AI Applications. OSDI.
+5. Dask documentation: https://docs.dask.org/
 
 ---
 
-*Documentação alinhada ao código em `main` — Junho 2026.*
+*Documentação alinhada ao código — branch `003-label-propagation-distributed`, Junho 2026.*

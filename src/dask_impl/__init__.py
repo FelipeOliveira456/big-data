@@ -1,3 +1,6 @@
-from dask_impl.louvain_dask import DaskLouvainResult, run_louvain_dask
+"""Dask-based Label Propagation implementation."""
 
-__all__ = ["run_louvain_dask", "DaskLouvainResult"]
+from dask_impl.lpa_dask import run_lpa_dask
+from lpa_core.lpa import LpaResult
+
+__all__ = ["run_lpa_dask", "LpaResult"]

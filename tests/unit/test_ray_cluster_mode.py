@@ -1,43 +1,48 @@
 """Tests for Ray cluster vs local init."""
 
-from pathlib import Path
+import logging
+from contextlib import ExitStack
 from unittest.mock import patch
 
-from ray_impl.louvain_ray import run_louvain_ray
+from graph.graph import Graph
+from ray_impl.lpa_ray import run_lpa_ray
 
 
-def test_run_louvain_ray_local_init(tiny_artifact: Path):
-    with patch("ray_impl.louvain_ray.ray.is_initialized", return_value=False), patch(
-        "ray_impl.louvain_ray.ray.init"
-    ) as mock_init, patch("ray_impl.louvain_ray._phase1_ray"), patch(
-        "ray_impl.louvain_ray.LouvainHierarchy"
-    ) as mock_hierarchy:
-        mock_hierarchy.from_graph.return_value.modularity_on_original.return_value = 0.1
-        mock_hierarchy.from_graph.return_value.orig_partition.side_effect = (
-            lambda p: p
+def _enter_ray_patches(stack: ExitStack):
+    stack.enter_context(patch("ray_impl.lpa_ray.ray.is_initialized", return_value=False))
+    stack.enter_context(patch("ray_impl.lpa_ray.ray.put", side_effect=lambda x: x))
+    stack.enter_context(patch("ray_impl.lpa_ray.ray.get", side_effect=lambda refs: refs))
+    stack.enter_context(
+        patch(
+            "ray_impl.lpa_ray.lpa_chunk_remote.remote",
+            side_effect=lambda chunk, graph, snap: (
+                snap[chunk],
+                {"host": "ray-worker", "peak_rss_mb": 128.0},
+            ),
         )
-        mock_hierarchy.from_graph.return_value.compress_level.side_effect = (
-            lambda p, g: (g, p)
-        )
-        run_louvain_ray(tiny_artifact, num_cpus=2)
-        mock_init.assert_called_once_with(num_cpus=2, ignore_reinit_error=True)
+    )
 
 
-def test_run_louvain_ray_cluster_init(tiny_artifact: Path):
-    with patch("ray_impl.louvain_ray.ray.is_initialized", return_value=False), patch(
-        "ray_impl.louvain_ray.ray.init"
-    ) as mock_init, patch("ray_impl.louvain_ray._phase1_ray"), patch(
-        "ray_impl.louvain_ray.LouvainHierarchy"
-    ) as mock_hierarchy:
-        mock_hierarchy.from_graph.return_value.modularity_on_original.return_value = 0.1
-        mock_hierarchy.from_graph.return_value.orig_partition.side_effect = (
-            lambda p: p
+def test_run_lpa_ray_local_init(tiny_graph: Graph):
+    with ExitStack() as stack:
+        _enter_ray_patches(stack)
+        mock_init = stack.enter_context(patch("ray_impl.lpa_ray.ray.init"))
+        run_lpa_ray(tiny_graph, num_cpus=2, max_iter=1)
+        mock_init.assert_called_once_with(
+            num_cpus=2, ignore_reinit_error=True, logging_level=logging.WARNING
         )
-        mock_hierarchy.from_graph.return_value.compress_level.side_effect = (
-            lambda p, g: (g, p)
+
+
+def test_run_lpa_ray_cluster_init(tiny_graph: Graph):
+    with ExitStack() as stack:
+        _enter_ray_patches(stack)
+        mock_init = stack.enter_context(patch("ray_impl.lpa_ray.ray.init"))
+        stack.enter_context(
+            patch("ray_impl.lpa_ray.ray.cluster_resources", return_value={"CPU": 3.0})
         )
-        run_louvain_ray(tiny_artifact, ray_head_address="10.0.0.5")
+        run_lpa_ray(tiny_graph, ray_head_address="10.0.0.5", max_iter=1)
         mock_init.assert_called_once_with(
             address="ray://10.0.0.5:10001",
             ignore_reinit_error=True,
+            logging_level=logging.WARNING,
         )

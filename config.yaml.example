@@ -1,12 +1,18 @@
-# Copy to config.yaml and adjust paths
-graph_raw_path: data/raw/email-Enron.txt
-dataset_slug: email-enron
-artifact_dir: data/artifacts
+# Copy to config.yaml and adjust paths.
+
+graph_raw_path: data/raw/soc-pokec-relationships.txt
+dataset_slug: pokec
 reports_dir: reports
 seed: 42
-epsilon: 1.0e-6
-ray_num_cpus: null  # null = auto-detect CPUs on this node
-ray_batch_size: 1000
-dask_n_workers: null  # null = auto (LocalCluster decides from CPU count)
-ray_head_address: null  # e.g. 10.0.0.10 — connect to remote Ray head
-dask_scheduler_address: null  # e.g. 10.0.0.10:8786 — remote Dask scheduler
+lpa_max_iter: 50
+
+# null = auto from CPU count (override with LPA_WORKERS or LPA_CHUNK_DIVISOR)
+lpa_chunk_divisor: null
+
+# null = same as lpa_chunk_divisor on single-host runs
+ray_num_cpus: null
+dask_n_workers: null
+
+# Leave null for local Ray/Dask on one machine (default).
+ray_head_address: null
+dask_scheduler_address: null

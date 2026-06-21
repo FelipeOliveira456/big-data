@@ -1,12 +1,12 @@
-# Distributed Louvain (email-Enron)
+# Distributed Label Propagation (soc-Pokec)
 
-Trabalho de Big Data: detecção de comunidades com Louvain distribuído — **Ray** (manual) vs **Dask** (manual).
+Trabalho de Big Data: detecção de comunidades com **Label Propagation** distribuído — **Ray** vs **Dask**.
 
-**Dataset:** [email-Enron](https://snap.stanford.edu/data/email-Enron.html) (~37k nós, ~184k arestas) — cabe em VM free tier (24 GB).
+**Dataset:** [soc-Pokec](https://snap.stanford.edu/data/soc-Pokec.html) (~1,63M nós LCC, ~22M arestas direcionadas). Integração usa **0,1%** (~1,6k nós).
 
 ## Documentação
 
-**[docs/DOCUMENTACAO_PROJETO.md](docs/DOCUMENTACAO_PROJETO.md)** — explicação completa do código, arquitetura, Louvain, Ray vs Dask, Docker, cluster e uso local.
+**[docs/DOCUMENTACAO_PROJETO.md](docs/DOCUMENTACAO_PROJETO.md)** — arquitetura, LPA, Ray vs Dask, Docker e CLI.
 
 ---
 
@@ -14,151 +14,93 @@ Trabalho de Big Data: detecção de comunidades com Louvain distribuído — **R
 
 | Modo | O que precisa |
 |------|----------------|
-| **Desenvolvimento / CLI / QA** | Python **3.11+**, venv, deps em `pyproject.toml` |
-| **Docker (single host)** | Docker ≥ 24, Compose plugin — **não** precisa de venv no host |
-| **Cluster Oracle (4 VMs)** | Docker em cada VM + Security List com portas 6379, 10001, 8786, 8787 |
-| **Testes E2E** | venv + dataset Enron (download automático nos scripts) |
+| **Desenvolvimento / QA** | Python **3.11+**, venv, `pip install -e ".[dev]"` |
+| **Produção (1 VM)** | Docker + ~6–8 GB RAM para Pokec 100% |
+| **Testes E2E** | venv + fixture `pokec_0p1pct.npz` |
 
 ---
 
-## Setup (venv) — obrigatório para QA e CLI local
-
-Dependências de runtime e dev ficam no **`pyproject.toml`** (`[project]` e `[project.optional-dependencies] dev`). Não há `requirements.txt` separado.
-
-O **`make qa`** e os comandos `python -m cli.main` rodam **no host**, dentro do venv. O Docker **não** usa o venv do host.
+## Setup (venv)
 
 ```bash
-# 1. Criar e ativar venv
-python3.11 -m venv .venv
-source .venv/bin/activate          # Linux/macOS
-# .venv\Scripts\activate           # Windows
-
-# 2. Instalar projeto + ferramentas de dev (ruff, pytest, mutmut, etc.)
-pip install --upgrade pip
+python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-
-# ou: make install
-
-# 3. Config opcional
-cp config.yaml.example config.yaml   # ajuste paths se necessário
+cp config.yaml.example config.yaml   # opcional
 ```
+
+Workers e chunks LPA: **auto = número de CPUs** (`LPA_WORKERS=4` para fixar).
 
 ---
 
-## QA (lint, testes, mutação)
-
-Roda **no host com venv ativo**. Gera `reports/qa_<timestamp>.md` (gitignored).
+## QA
 
 ```bash
-source .venv/bin/activate
-
-make qa-check    # rápido: ruff + pylint + bandit (sem pytest/mutmut)
-make qa          # completo: ruff, pylint, bandit, pytest+coverage, mutmut
-                 # exit code sempre 0 — relatório informativo, não é gate de CI
+make qa          # ruff, pylint, bandit, pytest+coverage, mutmut
+make qa-check    # só lint
 ```
-
-O script `scripts/run_qa.sh` ativa `.venv` automaticamente se existir, mas **as ferramentas precisam estar instaladas no venv** (`pip install -e ".[dev]"`).
 
 ---
 
 ## Testes
 
 ```bash
-source .venv/bin/activate
-pytest tests/unit/ -v              # unitários (~70 testes, segundos)
-pytest tests/integration/ -v -m integration   # E2E Ray+Dask (lento, minutos)
+pytest tests/unit/ -v
+pytest tests/integration/test_lpa_pokec.py -m integration -v -s
 ```
+
+Fixture: `bash scripts/build_integration_fixture.sh` (requer raw Pokec).
 
 ---
 
-## Dataset + CLI (host com venv)
+## CLI (host)
 
 ```bash
-source .venv/bin/activate
-
 bash scripts/download_dataset.sh
-python -m cli.main preprocess --fractions 100
-python -m cli.main louvain-ray --artifact data/artifacts/email-enron_100pct.parquet
-python -m cli.main louvain-dask --artifact data/artifacts/email-enron_100pct.parquet
-python -m cli.main benchmark --fractions 100 --runs 3
+python -m cli.main benchmark --input data/raw/soc-pokec-relationships.txt --fractions 100 --runs 3
 python -m cli.main report
 ```
 
-Pipeline completo no host: `bash scripts/run_all.sh` (requer venv em `.venv`).
-
-### Saídas do pipeline
-
-| Comando | Arquivo gerado |
-|---------|----------------|
-| `benchmark` | `reports/metrics_raw_YYYYMMDDTHHMMSS.csv` |
-| `report` | `reports/comparison_YYYYMMDDTHHMMSS.md` |
-| `make qa` | `reports/qa_YYYYMMDDTHHMMSS.md` |
-
-Arquivos em `reports/` são gitignored. Testes E2E gravam em `tests/integration/output/benchmark/` sem tocar em `reports/`.
+Pipeline completo: `bash scripts/run_all.sh`
 
 ---
 
-## Docker (single host)
+## Docker (1 VM)
 
-**Não usa venv do host.** A imagem instala deps via `pip install .` no build (lê `pyproject.toml`).
+Grafo carrega **só nesta máquina**. Ray e Dask usam workers locais (1 por CPU).
 
 ```bash
-docker build -t distributed-louvain:latest .
-docker compose --profile single up
+bash scripts/run-docker.sh
+# ou:
+docker compose up --build
 ```
 
-Volumes montados:
+Volumes: `./data`, `./reports`. Env no `docker-compose.yml`:
 
-- `./data` → dataset bruto + Parquet
-- `./reports` → CSV/MD timestampados
-- `./config.yaml.example` → `/app/config.yaml` (read-only)
+| Variável | Default |
+|----------|---------|
+| `BENCHMARK_FRACTIONS` | `100` |
+| `BENCHMARK_RUNS` | `3` |
+| `BENCHMARK_BACKEND` | `both` (Ray → Dask → report) |
+| `LPA_WORKERS` | auto (CPUs do container) |
 
-O contêiner baixa o Enron automaticamente se `data/raw/email-Enron.txt` não existir.
+Build ARM (Oracle Ampere): `docker build -t distributed-lpa:latest .`
 
 ---
 
-## Cluster (4 VMs Oracle ARM)
+## Saídas
 
-```bash
-export HEAD_IP=<IP_PRIVADO_VM1>
-bash scripts/start-cluster.sh   # imprime docker run por VM — copie em cada máquina
-```
-
-Abra no **Security List** da Oracle (subnet privada): **6379**, **10001**, **8786**, **8787**.
-
-Build multi-arch (Oracle ARM + amd64 local):
-
-```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t distributed-louvain:latest .
-```
+| Artefato | Onde |
+|----------|------|
+| `metrics_raw_<stamp>.csv` | `reports/` |
+| `partitions_<stamp>/*.communities.json` | `reports/` |
+| `comparison_<stamp>.md` | `reports/` |
 
 ---
 
-## Makefile — alvos principais
-
-| Alvo | Onde roda | Descrição |
-|------|-----------|-----------|
-| `install` | venv | `pip install -e ".[dev]"` |
-| `test` | venv | `pytest tests/unit/` |
-| `qa` | venv | suite QA completa → `reports/qa_*.md` |
-| `qa-check` | venv | lint rápido (ruff, pylint, bandit) |
-| `preprocess` / `benchmark` / `report` | venv | atalhos para CLI |
-
----
-
-## Estrutura do projeto
+## Estrutura
 
 ```text
-src/louvain_core/     # ΔQ, modularidade, compressão
-src/preprocessing/    # SNAP → Parquet (LCC)
-src/ray_impl/         # Louvain Ray
-src/dask_impl/        # Louvain Dask
-src/benchmark/        # métricas + relatório
-src/cli/              # entrypoint
-tests/unit/
-tests/integration/
-data/artifacts/       # grafos Parquet (gitignored)
-reports/              # saídas locais (gitignored)
-scripts/              # download, docker, cluster, QA
-pyproject.toml        # dependências runtime + dev
+src/lpa_core/   src/graph/   src/ray_impl/   src/dask_impl/
+src/preprocessing/   src/benchmark/   src/cli/
+scripts/   docker-compose.yml   config.yaml.example
 ```

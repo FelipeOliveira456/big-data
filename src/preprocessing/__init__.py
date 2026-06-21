@@ -1,14 +1,11 @@
-"""SNAP preprocessing pipeline."""
+"""SNAP graph loading: direct in-memory CSR from edge lists."""
 
-from preprocessing.load_snap import collect_nodes, load_normalized_edges
-from preprocessing.pipeline import build_artifact, run_preprocess
-from preprocessing.write_artifact import read_edges_parquet, write_graph_parquet
+from preprocessing.load_graph import GraphLoadResult, load_graph_from_snap
+from preprocessing.load_snap import collect_node_set, iter_directed_edges
 
 __all__ = [
-    "load_normalized_edges",
-    "collect_nodes",
-    "build_artifact",
-    "run_preprocess",
-    "write_graph_parquet",
-    "read_edges_parquet",
+    "collect_node_set",
+    "GraphLoadResult",
+    "iter_directed_edges",
+    "load_graph_from_snap",
 ]

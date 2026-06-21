@@ -16,15 +16,34 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 class AppConfig:
     graph_raw_path: Path
     dataset_slug: str
-    artifact_dir: Path
     reports_dir: Path
     seed: int
-    epsilon: float
+    lpa_max_iter: int
+    lpa_chunk_divisor: int
     ray_num_cpus: int | None
-    ray_batch_size: int
     dask_n_workers: int | None
     ray_head_address: str | None
     dask_scheduler_address: str | None
+
+
+def resolve_worker_count() -> int:
+    """Parallel workers / LPA chunks from ``LPA_WORKERS`` or host CPU count."""
+    raw = os.environ.get("LPA_WORKERS", "").strip()
+    if raw:
+        return max(1, int(raw))
+    return max(1, os.cpu_count() or 1)
+
+
+def effective_ray_cpus(cfg: AppConfig) -> int | None:
+    if cfg.ray_head_address:
+        return cfg.ray_num_cpus
+    return cfg.ray_num_cpus if cfg.ray_num_cpus is not None else cfg.lpa_chunk_divisor
+
+
+def effective_dask_workers(cfg: AppConfig) -> int | None:
+    if cfg.dask_scheduler_address:
+        return cfg.dask_n_workers
+    return cfg.dask_n_workers if cfg.dask_n_workers is not None else cfg.lpa_chunk_divisor
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -46,6 +65,16 @@ def _optional_str(value: Any) -> str | None:
     return str(value)
 
 
+def _int_or_workers(value: Any) -> int:
+    if value is None or value == "" or value == "null":
+        return resolve_worker_count()
+    return int(value)
+
+
+# Worker chain: resolve_worker_count() → lpa_chunk_divisor (when null in YAML)
+# → effective_ray_cpus / effective_dask_workers (when ray_num_cpus / dask_n_workers null).
+
+
 def load_config(config_path: Path | None = None) -> AppConfig:
     path = config_path or REPO_ROOT / "config.yaml"
     if not path.is_file():
@@ -59,9 +88,11 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         alt = {
             "graph_raw_path": "GRAPH_RAW_PATH",
             "dataset_slug": "DATASET_SLUG",
-            "artifact_dir": "ARTIFACT_DIR",
+            "reports_dir": "REPORTS_DIR",
             "seed": "SEED",
-            "epsilon": "EPSILON",
+            "lpa_max_iter": "LPA_MAX_ITER",
+            "lpa_chunk_divisor": "LPA_CHUNK_DIVISOR",
+            "ray_num_cpus": "RAY_NUM_CPUS",
             "dask_n_workers": "DASK_N_WORKERS",
             "ray_head_address": "RAY_HEAD_ADDRESS",
             "dask_scheduler_address": "DASK_SCHEDULER_ADDRESS",
@@ -71,16 +102,13 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         return raw.get(key, default)
 
     return AppConfig(
-        graph_raw_path=Path(get("graph_raw_path", "data/raw/email-Enron.txt")),
-        dataset_slug=str(get("dataset_slug", "email-enron")),
-        artifact_dir=Path(get("artifact_dir", "data/artifacts")),
+        graph_raw_path=Path(get("graph_raw_path", "data/raw/soc-pokec-relationships.txt")),
+        dataset_slug=str(get("dataset_slug", "pokec")),
         reports_dir=Path(get("reports_dir", "reports")),
         seed=int(get("seed", 42)),
-        epsilon=float(get("epsilon", 1e-6)),
-        ray_num_cpus=int(os.environ["RAY_NUM_CPUS"])
-        if os.environ.get("RAY_NUM_CPUS")
-        else None,
-        ray_batch_size=int(get("ray_batch_size", 1000)),
+        lpa_max_iter=int(get("lpa_max_iter", 50)),
+        lpa_chunk_divisor=_int_or_workers(get("lpa_chunk_divisor", None)),
+        ray_num_cpus=_optional_int(get("ray_num_cpus", None)),
         dask_n_workers=_optional_int(get("dask_n_workers", None)),
         ray_head_address=_optional_str(get("ray_head_address", None)),
         dask_scheduler_address=_optional_str(get("dask_scheduler_address", None)),

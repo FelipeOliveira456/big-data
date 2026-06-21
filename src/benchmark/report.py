@@ -5,23 +5,24 @@ from __future__ import annotations
 import csv
 import statistics
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 
-from benchmark.report_sections import RACE_CONDITION_RAY, REFERENCES
+from benchmark.report_sections import LPA_PARALLELISM, REFERENCES
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
-def _loc_count(glob_paths: list[str]) -> dict[str, int]:
+@lru_cache(maxsize=8)
+def _loc_count(glob_pattern: str) -> dict[str, int]:
     counts: dict[str, int] = {}
-    for pattern in glob_paths:
-        for path in REPO_ROOT.glob(pattern):
-            if path.suffix == ".py":
-                counts[str(path.relative_to(REPO_ROOT))] = sum(
-                    1
-                    for line in path.read_text(encoding="utf-8").splitlines()
-                    if line.strip()
-                )
+    for path in REPO_ROOT.glob(glob_pattern):
+        if path.suffix == ".py":
+            counts[str(path.relative_to(REPO_ROOT))] = sum(
+                1
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            )
     return counts
 
 
@@ -40,19 +41,21 @@ def generate_report(input_csv: Path, output_md: Path) -> Path:
         "",
         "## Resumo",
         "",
-        "Comparação de Louvain distribuído no dataset email-Enron (artefatos Parquet compartilhados).",
+        "Comparação de Label Propagation distribuído no dataset soc-Pokec (carga direta do SNAP).",
         "",
         "## Desempenho (média ± desvio)",
         "",
-        "Memória RSS = driver + workers (filhos do processo). "
+        "Memória RSS = driver + workers locais (filhos do processo). "
+        "`peak_cluster_rss_mb` = soma dos picos por hostname (VM). "
         "`peak_memory_mb` = heap Python (tracemalloc, só driver).",
         "",
-        "| Abordagem | Fração % | Tempo algo (s) | RSS total (MB) | RSS driver (MB) | Throughput (nós/s) | Q |",
-        "|-----------|----------|----------------|----------------|-----------------|---------------------|---|",
+        "| Abordagem | Fração % | Tempo total (s) | Tempo algo (s) | RSS total (MB) | RSS driver (MB) | Throughput (nós/s) |",
+        "|-----------|----------|-----------------|----------------|----------------|-----------------|---------------------|",
     ]
 
     for (approach, frac), items in sorted(groups.items()):
         times = [float(x["algorithm_time_s"]) for x in items]
+        totals = [float(x.get("total_time_s") or x["algorithm_time_s"]) for x in items]
         tree_mem = [
             float(x.get("peak_process_tree_rss_mb") or x.get("peak_memory_mb", 0))
             for x in items
@@ -62,27 +65,70 @@ def generate_report(input_csv: Path, output_md: Path) -> Path:
             for x in items
         ]
         thr = [float(x["throughput_nodes_per_s"]) for x in items]
-        qs = [float(x["modularity_q"]) for x in items]
         lines.append(
             f"| {approach} | {frac} | "
+            f"{statistics.mean(totals):.2f} ± {statistics.pstdev(totals) if len(totals) > 1 else 0:.2f} | "
             f"{statistics.mean(times):.2f} ± {statistics.pstdev(times) if len(times) > 1 else 0:.2f} | "
             f"{statistics.mean(tree_mem):.0f} ± {statistics.pstdev(tree_mem) if len(tree_mem) > 1 else 0:.0f} | "
             f"{statistics.mean(driver_mem):.0f} ± {statistics.pstdev(driver_mem) if len(driver_mem) > 1 else 0:.0f} | "
-            f"{statistics.mean(thr):.0f} ± {statistics.pstdev(thr) if len(thr) > 1 else 0:.0f} | "
-            f"{statistics.mean(qs):.4f} ± {statistics.pstdev(qs) if len(qs) > 1 else 0:.4f} |"
+            f"{statistics.mean(thr):.0f} ± {statistics.pstdev(thr) if len(thr) > 1 else 0:.0f} |"
         )
 
     lines.extend(["", "## Qualidade", ""])
     for (approach, frac), items in sorted(groups.items()):
-        qs = [float(x["modularity_q"]) for x in items]
         comms = [int(x["num_communities"]) for x in items]
         lines.append(
-            f"- **{approach} {frac}%**: Q médio={statistics.mean(qs):.4f}, "
-            f"comunidades≈{statistics.mean(comms):.0f}"
+            f"- **{approach} {frac}%**: comunidades≈{statistics.mean(comms):.0f}"
         )
 
-    ray_loc = sum(_loc_count(["src/ray_impl/**/*.py"]).values())
-    dask_loc = sum(_loc_count(["src/dask_impl/**/*.py"]).values())
+    cluster_rows = [r for r in success if r.get("peak_cluster_rss_mb")]
+    if cluster_rows:
+        lines.extend(
+            [
+                "",
+                "## Memória por VM (pico RSS)",
+                "",
+                "Soma `peak_cluster_rss_mb` ≈ pico total do cluster (driver + workers remotos).",
+                "",
+                "| Abordagem | Fração % | Run | Cluster RSS (MB) | Por VM (JSON) |",
+                "|-----------|----------|-----|------------------|---------------|",
+            ]
+        )
+        for r in sorted(
+            cluster_rows,
+            key=lambda x: (x["approach"], x["fraction_pct"], int(x["run_index"])),
+        ):
+            lines.append(
+                f"| {r['approach']} | {r['fraction_pct']} | {r['run_index']} | "
+                f"{float(r.get('peak_cluster_rss_mb') or 0):.0f} | "
+                f"`{r.get('vm_peaks_json', '{}')}` |"
+            )
+
+    partition_rows = [r for r in success if r.get("communities_json")]
+    if partition_rows:
+        lines.extend(
+            [
+                "",
+                "## Partições (clusters finais)",
+                "",
+                "Cada execução gera JSON resumo e `*.communities.json` com listas de nós por cluster.",
+                "",
+                "| Abordagem | Fração % | Run | Cluster RSS (MB) | Communities |",
+                "|-----------|----------|-----|----------------|-------------|",
+            ]
+        )
+        for r in sorted(
+            partition_rows,
+            key=lambda x: (x["approach"], x["fraction_pct"], int(x["run_index"])),
+        ):
+            lines.append(
+                f"| {r['approach']} | {r['fraction_pct']} | {r['run_index']} | "
+                f"{float(r.get('peak_cluster_rss_mb') or r.get('peak_process_tree_rss_mb') or 0):.0f} | "
+                f"`{r.get('communities_json', '')}` |"
+            )
+
+    ray_loc = sum(_loc_count("src/ray_impl/**/*.py").values())
+    dask_loc = sum(_loc_count("src/dask_impl/**/*.py").values())
     lines.extend(
         [
             "",
@@ -93,7 +139,7 @@ def generate_report(input_csv: Path, output_md: Path) -> Path:
             "- Infra Ray: Python + pip",
             "- Infra Dask: Python + dask[distributed]",
             "",
-            RACE_CONDITION_RAY,
+            LPA_PARALLELISM,
             "",
             REFERENCES,
         ]

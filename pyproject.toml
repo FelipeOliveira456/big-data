@@ -3,16 +3,15 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "distributed-louvain"
-version = "0.1.0"
-description = "Distributed Louvain community detection on email-Enron (Ray vs Dask)"
+name = "distributed-lpa"
+version = "0.2.0"
+description = "Distributed Label Propagation on soc-Pokec (Ray vs Dask)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "ray>=2.9.0",
     "dask[distributed]>=2024.1.0",
-    "pyarrow>=14.0.0",
-    "networkx>=3.2",
+    "numpy>=1.26.0",
     "pyyaml>=6.0",
     "psutil>=5.9.0",
 ]
@@ -30,7 +29,7 @@ dev = [
 ]
 
 [project.scripts]
-louvain = "cli.main:main"
+lpa = "cli.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -43,7 +42,8 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
 markers = [
-    "integration: full E2E pipeline with Ray/Dask (slow)",
+    "integration: full E2E LPA pipeline with Ray/Dask (slow)",
+    "load_graph: full-graph SNAP→CSR load integration (very slow)",
 ]
 
 [tool.deptry]
@@ -53,7 +53,8 @@ known_first_party = [
     "cli",
     "config",
     "dask_impl",
-    "louvain_core",
+    "graph",
+    "lpa_core",
     "preprocessing",
     "ray_impl",
 ]
@@ -62,16 +63,11 @@ known_first_party = [
 pyyaml = "yaml"
 
 [tool.mutmut]
-source_paths = ["src/louvain_core"]
-only_mutate = ["src/louvain_core/*.py"]
+source_paths = ["src/lpa_core", "src/graph"]
+only_mutate = ["src/lpa_core/*.py", "src/graph/*.py"]
 pytest_add_cli_args = [
-    "tests/unit/test_modularity.py",
-    "tests/unit/test_compress.py",
-    "tests/unit/test_delta_q.py",
-    "tests/unit/test_delta_q_batch.py",
-    "tests/unit/test_stop_epsilon.py",
-    "tests/unit/test_runner.py",
-    "tests/unit/test_hierarchy.py",
+    "tests/unit/test_lpa.py",
     "tests/unit/test_edge_cases.py",
     "tests/unit/test_graph_edges.py",
+    "tests/unit/test_graph_core.py",
 ]

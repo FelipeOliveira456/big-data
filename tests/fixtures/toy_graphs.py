@@ -2,29 +2,19 @@
 
 from __future__ import annotations
 
-# Triangle + tail: known structure for modularity tests
-TRIANGLE_EDGES = [
-    (0, 1, 1.0),
-    (1, 2, 1.0),
-    (0, 2, 1.0),
-    (2, 3, 1.0),
-]
 
-# Two cliques connected by bridge
-TWO_CLiques_EDGES = [
-    (0, 1, 1.0),
-    (1, 2, 1.0),
-    (0, 2, 1.0),
-    (3, 4, 1.0),
-    (4, 5, 1.0),
-    (3, 5, 1.0),
-    (2, 3, 1.0),
-]
+def _bidirected_clique(nodes: list[int]) -> list[tuple[int, int]]:
+    return [(u, v) for u in nodes for v in nodes if u != v]
+
+
+TRIANGLE_EDGES = [(0, 1), (1, 2), (0, 2)]
+
+# Two 3-node cliques as directed pairs (test helper expands via from_undirected_edges)
+TWO_CLiques_EDGES = [(0, 1), (1, 2), (0, 2), (3, 4), (4, 5), (3, 5)]
 
 DIRECTED_SAMPLE_LINES = [
     "# comment\n",
     "1 2\n",
-    "2 1\n",
     "3 3\n",
     "3 4\n",
 ]

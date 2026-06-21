@@ -19,10 +19,14 @@ data/artifacts/*.parquet
 data/artifacts/*.meta.json
 reports/metrics_raw_*.csv
 reports/comparison_*.md
+reports/benchmark_run_*.log
 reports/qa_*.md
 reports/latest_run.txt
+reports/partitions_*/
+reports/partitions_*/*
 tests/integration/output/benchmark/metrics_raw_*.csv
 tests/integration/output/benchmark/comparison_*.md
+tests/integration/output/benchmark/benchmark_run_*.log
 tests/integration/output/benchmark/latest_run.txt
 
 # Ray

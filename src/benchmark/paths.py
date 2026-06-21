@@ -16,12 +16,20 @@ def benchmark_run_stamp(when: datetime | None = None) -> str:
     return moment.strftime("%Y%m%dT%H%M%S")
 
 
+def partitions_dir(directory: Path, stamp: str) -> Path:
+    return directory / f"partitions_{stamp}"
+
+
 def metrics_csv_path(directory: Path, stamp: str) -> Path:
     return directory / f"metrics_raw_{stamp}.csv"
 
 
 def comparison_md_path(directory: Path, stamp: str) -> Path:
     return directory / f"comparison_{stamp}.md"
+
+
+def run_log_path(directory: Path, stamp: str) -> Path:
+    return directory / f"benchmark_run_{stamp}.log"
 
 
 def stamp_from_metrics_csv(path: Path) -> str | None:

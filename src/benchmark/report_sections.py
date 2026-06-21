@@ -1,22 +1,18 @@
 """Reusable Markdown sections for benchmark reports."""
 
-RACE_CONDITION_RAY = """
-## Ray: race conditions no Louvain distribuído
+LPA_PARALLELISM = """
+## LPA distribuído: paralelismo por iteração
 
-Na Fase 1, workers Ray avaliam movimentos com base no **mesmo snapshot** da
-partição de comunidades. Dois workers podem propor comunidades diferentes para o
-mesmo nó; a aplicação **síncrona ao fim da rodada** (último movimento vence para
-conflitos no mesmo nó) é comportamento esperado em Louvain paralelo assíncrono.
-
-O algoritmo continua a convergir na prática porque cada rodada completa
-reavalia todos os nós sobre o estado atualizado. Esta limitação está documentada
-conforme FR-012.
+Cada iteração do Label Propagation usa um **snapshot síncrono** dos rótulos.
+Os nós são particionados em chunks; todos os workers avaliam seus chunks **em
+paralelo** (tasks Ray ou futures Dask lançados antes de qualquer coleta). O
+driver faz merge dos rótulos e recalcula Q antes da próxima iteração.
 """.strip()
 
 REFERENCES = """
 ## Referências
 
-1. Blondel et al. (2008). Fast unfolding of communities in large networks. J. Stat. Mech. P10008.
+1. Raghavan, U.N. et al. (2007). Near linear time algorithm to detect community structures in large-scale networks. *Physical Review E*, 76, 036106.
 2. Leskovec & Krevl (2014). SNAP Datasets. https://snap.stanford.edu/data
 3. Moritz et al. (2018). Ray: A Distributed Framework for Emerging AI Applications. OSDI 2018.
 4. Rocklin (2015). Dask: Parallel Computation with Blocked algorithms and Task Scheduling. SciPy 2015.

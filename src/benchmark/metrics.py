@@ -74,19 +74,6 @@ def track_memory_peaks(
         peaks.tracemalloc_mb = peak_bytes / (1024 * 1024)
 
 
-@contextmanager
-def peak_memory_mb() -> Iterator[list[float]]:
-    """Context yielding a one-element list updated with tracemalloc peak MB on exit."""
-    peak: list[float] = [0.0]
-    tracemalloc.start()
-    try:
-        yield peak
-    finally:
-        _, peak_bytes = tracemalloc.get_traced_memory()
-        tracemalloc.stop()
-        peak[0] = peak_bytes / (1024 * 1024)
-
-
 def throughput_nodes_per_s(node_count: int, algorithm_time_s: float) -> float:
     if algorithm_time_s <= 0:
         return 0.0

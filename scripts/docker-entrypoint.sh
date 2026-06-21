@@ -1,45 +1,77 @@
 #!/usr/bin/env bash
+# Single-VM pipeline: download (if needed) → benchmark Ray+Dask → report.
 set -euo pipefail
 cd /app
 
-: "${CONTAINER_ROLE:=pipeline}"
-: "${GRAPH_RAW_PATH:=data/raw/email-Enron.txt}"
+: "${GRAPH_RAW_PATH:=data/raw/soc-pokec-relationships.txt}"
+: "${BENCHMARK_FRACTIONS:=100}"
+: "${BENCHMARK_RUNS:=3}"
+: "${BENCHMARK_STAMP:=}"
+: "${BENCHMARK_SEEDS:=}"
+: "${LPA_WORKERS:=}"
 
-run_pipeline() {
+if [[ -z "$BENCHMARK_STAMP" ]]; then
+  BENCHMARK_STAMP=$(date -u +%Y%m%dT%H%M%S)
+fi
+export BENCHMARK_STAMP
+
+benchmark_backend_flag() {
+  case "$1" in
+    ray) echo "--ray-only" ;;
+    dask) echo "--dask-only" ;;
+    both) echo "" ;;
+    *)
+      echo "Unknown BENCHMARK_BACKEND: $1" >&2
+      exit 1
+      ;;
+  esac
+}
+
+run_benchmark() {
   if [[ ! -f "$GRAPH_RAW_PATH" ]]; then
     bash scripts/download_dataset.sh
   fi
-  python -m cli.main preprocess --fractions 100
-  python -m cli.main benchmark --fractions 100 --runs 3
-  python -m cli.main report
+  local backend=$1
+  local append_flag=()
+  [[ "$2" == "1" ]] && append_flag=(--append)
+  local stamp_args=()
+  [[ -n "$BENCHMARK_STAMP" ]] && stamp_args=(--run-stamp "$BENCHMARK_STAMP")
+  local backend_flag
+  backend_flag=$(benchmark_backend_flag "$backend")
+  python -m cli.main benchmark \
+    --input "$GRAPH_RAW_PATH" \
+    --fractions "$BENCHMARK_FRACTIONS" \
+    --runs "$BENCHMARK_RUNS" \
+    "${stamp_args[@]}" \
+    ${backend_flag:+$backend_flag} \
+    "${append_flag[@]}"
 }
 
-case "$CONTAINER_ROLE" in
-  pipeline)
-    run_pipeline
+run_report() {
+  local stamp_args=()
+  if [[ -n "$BENCHMARK_STAMP" ]]; then
+    stamp_args=(--input-csv "reports/metrics_raw_${BENCHMARK_STAMP}.csv")
+  fi
+  python -m cli.main report "${stamp_args[@]}"
+}
+
+: "${BENCHMARK_BACKEND:=both}"
+
+if [[ ! -f "$GRAPH_RAW_PATH" ]]; then
+  bash scripts/download_dataset.sh
+fi
+
+case "$BENCHMARK_BACKEND" in
+  both)
+    run_benchmark ray 0
+    run_benchmark dask 1
     ;;
-  ray-head)
-    exec ray start --head --port=6379 --dashboard-host=0.0.0.0 --block
-    ;;
-  ray-worker)
-    if [[ -z "${RAY_HEAD_ADDRESS:-}" ]]; then
-      echo "RAY_HEAD_ADDRESS is required for ray-worker" >&2
-      exit 1
-    fi
-    exec ray start --address="$RAY_HEAD_ADDRESS" --block
-    ;;
-  dask-scheduler)
-    exec dask scheduler --host 0.0.0.0 --port 8786 --dashboard-address :8787
-    ;;
-  dask-worker)
-    if [[ -z "${DASK_SCHEDULER_ADDRESS:-}" ]]; then
-      echo "DASK_SCHEDULER_ADDRESS is required for dask-worker" >&2
-      exit 1
-    fi
-    exec dask worker "tcp://${DASK_SCHEDULER_ADDRESS#tcp://}"
+  ray|dask)
+    run_benchmark "$BENCHMARK_BACKEND" 0
     ;;
   *)
-    echo "Unknown CONTAINER_ROLE: $CONTAINER_ROLE" >&2
+    echo "BENCHMARK_BACKEND must be both, ray, or dask" >&2
     exit 1
     ;;
 esac
+run_report

@@ -1,13 +1,14 @@
 services:
-  louvain:
+  lpa:
     build: .
-    profiles: ["single"]
-    environment:
-      CONTAINER_ROLE: pipeline
-      GRAPH_RAW_PATH: /app/data/raw/email-Enron.txt
-      DATASET_SLUG: email-enron
-      SEED: "42"
+    image: distributed-lpa:latest
     volumes:
       - ./data:/app/data
       - ./reports:/app/reports
       - ./config.yaml.example:/app/config.yaml:ro
+    environment:
+      GRAPH_RAW_PATH: data/raw/soc-pokec-relationships.txt
+      BENCHMARK_FRACTIONS: "100"
+      BENCHMARK_RUNS: "3"
+      BENCHMARK_BACKEND: both
+      # LPA_WORKERS: unset → uses container CPU count

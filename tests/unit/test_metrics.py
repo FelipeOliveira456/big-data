@@ -2,18 +2,12 @@
 
 import psutil
 
-from benchmark.metrics import peak_memory_mb, track_memory_peaks, throughput_nodes_per_s
+from benchmark.metrics import track_memory_peaks, throughput_nodes_per_s
 
 
 def test_throughput_nodes_per_s():
     assert throughput_nodes_per_s(1000, 2.0) == 500.0
     assert throughput_nodes_per_s(100, 0.0) == 0.0
-
-
-def test_peak_memory_mb_tracks_allocation():
-    with peak_memory_mb() as peak:
-        _ = [0] * 10_000
-    assert peak[0] >= 0.0
 
 
 def test_track_memory_peaks_includes_process_tree():

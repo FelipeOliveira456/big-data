@@ -1,5 +1,6 @@
-"""Ray-based Louvain implementation."""
+"""Ray-based Label Propagation implementation."""
 
-from ray_impl.louvain_ray import RayLouvainResult, run_louvain_ray
+from lpa_core.lpa import LpaResult
+from ray_impl.lpa_ray import run_lpa_ray
 
-__all__ = ["run_louvain_ray", "RayLouvainResult"]
+__all__ = ["run_lpa_ray", "LpaResult"]

@@ -1,4 +1,6 @@
-.PHONY: install test preprocess benchmark report run-all qa qa-check
+.PHONY: install test benchmark report run-all qa qa-check
+
+GRAPH_RAW_PATH ?= data/raw/soc-pokec-relationships.txt
 
 install:
 	pip install -e ".[dev]"
@@ -6,16 +8,16 @@ install:
 test:
 	pytest tests/unit/ -v
 
-preprocess:
-	python -m cli.main preprocess --input "$(GRAPH_RAW_PATH)"
-
 benchmark:
-	python -m cli.main benchmark --fractions 100 --runs 3
+	python -m cli.main benchmark --input "$(GRAPH_RAW_PATH)" --fractions 100 --runs 3
 
 report:
 	python -m cli.main report
 
-run-all: preprocess benchmark report
+run-all: benchmark report
+
+docker:
+	bash scripts/run-docker.sh
 
 qa:
 	@echo "Running full QA suite (informative, never aborts)..."

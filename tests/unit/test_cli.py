@@ -2,65 +2,78 @@
 
 from argparse import Namespace
 from pathlib import Path
+from unittest.mock import MagicMock
+
 import cli.main as cli_main
-from cli.main import (
-    cmd_benchmark,
-    cmd_louvain_ray,
-    cmd_preprocess,
-    cmd_report,
-    main,
-)
-from preprocessing.write_artifact import write_graph_parquet
-from ray_impl.louvain_ray import RayLouvainResult
+from benchmark.paths import write_run_stamp
+from cli.main import cmd_benchmark, cmd_lpa_dask, cmd_lpa_ray, cmd_report, main
+from config import AppConfig
+from graph.graph import Graph
+from lpa_core.lpa import LpaResult
+from preprocessing.load_graph import GraphLoadResult
 
 
-def test_main_preprocess_missing_input(tmp_path: Path, monkeypatch):
+def _fake_loaded(graph: Graph | None = None) -> GraphLoadResult:
+    g = graph or Graph.from_undirected_edges([(0, 1)])
+    return GraphLoadResult(
+        graph=g,
+        load_time_s=0.05,
+        node_count=g.num_nodes,
+        edge_count=1,
+        fraction_pct=100.0,
+    )
+
+
+def test_main_lpa_ray_missing_input(tmp_path: Path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    code = main(["preprocess", "--input", str(tmp_path / "nope.txt")])
+    code = main(["lpa-ray", "--input", str(tmp_path / "nope.txt")])
     assert code == 1
 
 
-def test_cmd_preprocess_success(tmp_path: Path, monkeypatch):
+def test_cmd_lpa_ray_json_output(tmp_path: Path, capsys, monkeypatch):
     raw = tmp_path / "raw.txt"
-    raw.write_text("1 2\n2 3\n3 1\n", encoding="utf-8")
-    out_dir = tmp_path / "artifacts"
-    monkeypatch.setattr(
-        cli_main,
-        "run_preprocess",
-        lambda inp, out, seed, fracs, dataset_slug: [
-            out / "email-enron_100pct.parquet"
-        ],
-    )
-    monkeypatch.setattr(cli_main, "validate_artifact", lambda p: None)
-    args = Namespace(
-        input=str(raw),
-        output_dir=str(out_dir),
-        seed=42,
-        fractions="100",
-    )
-    assert cmd_preprocess(args) == 0
-
-
-def test_cmd_louvain_ray_json_output(tmp_path: Path, capsys, monkeypatch):
-    artifact = tmp_path / "g.parquet"
-    write_graph_parquet([(0, 1, 1.0)], artifact, {})
-    fake = RayLouvainResult(
-        modularity=0.5,
+    raw.write_text("0 1\n", encoding="utf-8")
+    fake = LpaResult(
         num_communities=1,
-        num_levels=1,
+        num_levels=3,
         init_time_s=0.01,
         algorithm_time_s=0.1,
     )
-    monkeypatch.setattr(cli_main, "validate_artifact", lambda p: None)
-    monkeypatch.setattr(cli_main, "run_louvain_ray", lambda *a, **k: fake)
+    monkeypatch.setattr(cli_main, "load_graph", lambda *a, **k: _fake_loaded())
+    monkeypatch.setattr(cli_main, "run_lpa_ray", lambda *a, **k: fake)
     args = Namespace(
-        artifact=str(artifact),
-        epsilon=None,
-        batch_size=None,
+        input=str(raw),
+        fraction=None,
+        seed=None,
+        max_iter=None,
         num_cpus=None,
+        output_partition=None,
     )
-    assert cmd_louvain_ray(args) == 0
-    assert '"modularity": 0.5' in capsys.readouterr().out
+    assert cmd_lpa_ray(args) == 0
+    assert '"num_communities": 1' in capsys.readouterr().out
+
+
+def test_cmd_lpa_dask_json_output(tmp_path: Path, capsys, monkeypatch):
+    raw = tmp_path / "raw.txt"
+    raw.write_text("0 1\n", encoding="utf-8")
+    fake = LpaResult(
+        num_communities=2,
+        num_levels=2,
+        init_time_s=0.02,
+        algorithm_time_s=0.2,
+    )
+    monkeypatch.setattr(cli_main, "load_graph", lambda *a, **k: _fake_loaded())
+    monkeypatch.setattr("dask_impl.lpa_dask.run_lpa_dask", lambda *a, **k: fake)
+    args = Namespace(
+        input=str(raw),
+        fraction=None,
+        seed=None,
+        max_iter=None,
+        n_workers=None,
+        output_partition=None,
+    )
+    assert cmd_lpa_dask(args) == 0
+    assert '"num_communities": 2' in capsys.readouterr().out
 
 
 def test_cmd_report_and_benchmark(tmp_path: Path, monkeypatch):
@@ -74,6 +87,8 @@ def test_cmd_report_and_benchmark(tmp_path: Path, monkeypatch):
     )
     assert cmd_report(Namespace(input_csv=str(csv_path), output_md=str(md_path))) == 0
 
+    raw = tmp_path / "raw.txt"
+    raw.write_text("0 1\n", encoding="utf-8")
     out_csv = tmp_path / "bench.csv"
     monkeypatch.setattr(
         "benchmark.runner.run_benchmark_campaign",
@@ -82,11 +97,83 @@ def test_cmd_report_and_benchmark(tmp_path: Path, monkeypatch):
     assert (
         cmd_benchmark(
             Namespace(
-                artifacts_dir=str(tmp_path),
+                input=str(raw),
                 output_csv=str(out_csv),
                 runs=1,
                 fractions="100",
+                fraction=None,
+                seed=None,
+                ray_only=False,
+                dask_only=False,
+                run_stamp=None,
+                append=False,
             )
         )
         == 0
     )
+
+
+def test_cmd_benchmark_append_reuses_latest_stamp(tmp_path: Path, monkeypatch):
+    raw = tmp_path / "raw.txt"
+    raw.write_text("0 1\n", encoding="utf-8")
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    write_run_stamp(reports, "20260101T120000")
+    captured: dict[str, str] = {}
+
+    def _fake_campaign(_path, out, **kwargs):
+        captured["out"] = str(out)
+        captured["stamp"] = kwargs.get("run_stamp")
+        return out
+
+    monkeypatch.setattr(cli_main, "load_config", lambda: AppConfig(
+        graph_raw_path=raw,
+        dataset_slug="pokec",
+        reports_dir=reports,
+        seed=42,
+        lpa_max_iter=50,
+        lpa_chunk_divisor=2,
+        ray_num_cpus=None,
+        dask_n_workers=None,
+        ray_head_address=None,
+        dask_scheduler_address=None,
+    ))
+    monkeypatch.setattr("benchmark.runner.run_benchmark_campaign", _fake_campaign)
+    code = cmd_benchmark(
+        Namespace(
+            input=str(raw),
+            output_csv=None,
+            runs=1,
+            fractions="100",
+            fraction=None,
+            seed=None,
+            ray_only=False,
+            dask_only=True,
+            run_stamp=None,
+            append=True,
+        )
+    )
+    assert code == 0
+    assert captured["stamp"] == "20260101T120000"
+    assert captured["out"].endswith("metrics_raw_20260101T120000.csv")
+
+
+def test_cmd_benchmark_rejects_both_flags(tmp_path: Path, capsys):
+    raw = tmp_path / "raw.txt"
+    raw.write_text("0 1\n", encoding="utf-8")
+    code = cmd_benchmark(
+        Namespace(
+            input=str(raw),
+            output_csv=None,
+            runs=1,
+            fractions="100",
+            fraction=None,
+            seed=None,
+            ray_only=True,
+            dask_only=True,
+            run_stamp=None,
+            append=False,
+        )
+    )
+    assert code == 1
+    assert "only one" in capsys.readouterr().err.lower()

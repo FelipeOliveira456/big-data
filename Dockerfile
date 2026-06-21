@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
@@ -20,6 +20,8 @@ RUN useradd --create-home --uid 1000 appuser \
 USER appuser
 
 ENV PYTHONPATH=/app/src:/app
-ENV CONTAINER_ROLE=pipeline
+ENV BENCHMARK_FRACTIONS=100
+ENV BENCHMARK_RUNS=3
+ENV BENCHMARK_BACKEND=both
 
 ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
