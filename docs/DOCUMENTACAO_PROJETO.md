@@ -44,6 +44,10 @@ Ambas leem o **mesmo grafo** — carregado do ficheiro SNAP ou de um fixture `.n
 
 A lógica central (iteração LPA, modularidade Q) fica em `lpa_core/` e `graph/`. Ray e Dask são camadas de paralelização do loop síncrono na **mesma VM**.
 
+<p align="center">
+  <img src="assets/lpa-two-communities.svg" alt="Exemplo: triângulo (3 nós) e par (2 nós) → duas comunidades" width="640"/>
+</p>
+
 ---
 
 ## 2. Objetivos
@@ -74,9 +78,9 @@ Referência: Raghavan, Albert & Kumara (2007).
 Não há número inicial de clusters *K* — o LPA descobre comunidades pelo consenso local.
 
 <p align="center">
-  <img src="assets/lpa-raghavan-karate-club.png" alt="Partições LPA no karate club (Raghavan et al. 2007, Fig. 4)" width="480"/>
+  <img src="assets/lpa-propagation-iterations.png" alt="Label Propagation: rótulos propagam por iteração" width="640"/>
   <br/>
-  <sub>Raghavan et al., <em>Phys. Rev. E</em> 76, 036106 (2007) — exemplo clássico no karate club de Zachary.</sub>
+  <sub>Neo4j — <a href="https://neo4j.com/blog/graph-data-science/graph-algorithms-neo4j-label-propagation/">Label Propagation</a> (Raghavan et al., 2007).</sub>
 </p>
 
 ### Modularidade Q

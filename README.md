@@ -19,24 +19,9 @@ Redes sociais como o **Orkut** são grafos com **milhões de nós** e **centenas
 > **Quem está naturalmente agrupado com quem?**  
 > Ou seja: encontrar **comunidades** — conjuntos de nós densamente conectados entre si e pouco conectados ao resto.
 
-```mermaid
-flowchart LR
-  subgraph rede["Rede social (Orkut)"]
-    U1((utilizador))
-    U2((utilizador))
-    U3((utilizador))
-    U4((utilizador))
-    U1 --- U2
-    U2 --- U3
-    U1 --- U3
-    U4 --- U4
-  end
-  subgraph comunidades["Comunidades descobertas"]
-    C1["Grupo A"]
-    C2["Grupo B"]
-  end
-  rede -->|"Label Propagation"| comunidades
-```
+<p align="center">
+  <img src="docs/assets/lpa-two-communities.svg" alt="Exemplo: triângulo (3 nós) e par (2 nós) formam duas comunidades" width="680"/>
+</p>
 
 | Desafio | Escala Orkut (100%) |
 |---------|---------------------|
@@ -60,9 +45,9 @@ O **Label Propagation** (Raghavan et al., 2007) detecta comunidades só com a to
 Grupos densamente ligados convergem rapidamente para o mesmo rótulo; regiões esparsas separam comunidades. A actualização é **síncrona** (snapshot no início da iteração) para comparar Ray e Dask de forma justa.
 
 <p align="center">
-  <img src="docs/assets/lpa-raghavan-karate-club.png" alt="Três partições LPA no karate club de Zachary (Raghavan et al. 2007, Fig. 4)" width="520"/>
+  <img src="docs/assets/lpa-propagation-iterations.png" alt="Label Propagation: rótulos propagam por iteração até formar clusters" width="720"/>
   <br/>
-  <sub>Figura do artigo original (Raghavan et al., <em>Phys. Rev. E</em> 2007): LPA no karate club de Zachary — exemplo clássico de comunidades emergentes.</sub>
+  <sub>Adaptado de <a href="https://neo4j.com/blog/graph-data-science/graph-algorithms-neo4j-label-propagation/">Neo4j — Label Propagation</a> (Raghavan et al., 2007).</sub>
 </p>
 
 **Qualidade final:** modularidade **Q** (Blondel et al., 2008) sobre a partição obtida.
