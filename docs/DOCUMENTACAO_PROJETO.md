@@ -44,10 +44,6 @@ Ambas leem o **mesmo grafo** — carregado do ficheiro SNAP ou de um fixture `.n
 
 A lógica central (iteração LPA, modularidade Q) fica em `lpa_core/` e `graph/`. Ray e Dask são camadas de paralelização do loop síncrono na **mesma VM**.
 
-<p align="center">
-  <img src="assets/lpa-two-communities.svg" alt="Exemplo: triângulo (3 nós) e par (2 nós) → duas comunidades" width="640"/>
-</p>
-
 ---
 
 ## 2. Objetivos

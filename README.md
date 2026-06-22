@@ -19,10 +19,6 @@ Redes sociais como o **Orkut** são grafos com **milhões de nós** e **centenas
 > **Quem está naturalmente agrupado com quem?**  
 > Ou seja: encontrar **comunidades** — conjuntos de nós densamente conectados entre si e pouco conectados ao resto.
 
-<p align="center">
-  <img src="docs/assets/lpa-two-communities.svg" alt="Exemplo: triângulo (3 nós) e par (2 nós) formam duas comunidades" width="680"/>
-</p>
-
 | Desafio | Escala Orkut (100%) |
 |---------|---------------------|
 | Nós | ~3,07 milhões |

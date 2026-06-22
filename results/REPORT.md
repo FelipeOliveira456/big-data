@@ -28,13 +28,7 @@ As **partições finais são idênticas** em todas as runs bem-sucedidas — o L
 
 ## 2. Metodologia
 
-### 2.0 Problema e algoritmo
-
-Detecção de **comunidades** — grupos densamente ligados, pouco ligados ao resto. Exemplo mínimo: um **triângulo** (3 nós) e um **par** (2 nós) formam duas comunidades separadas.
-
-<p align="center">
-  <img src="../docs/assets/lpa-two-communities.svg" alt="Duas comunidades: triangulo e par" width="640"/>
-</p>
+### 2.0 Algoritmo
 
 O **Label Propagation** propaga rótulos por iteração até os vizinhos convergirem para os mesmos clusters:
 
@@ -142,7 +136,6 @@ Com **3M+ nós**, os JSON de partições **não incluem `node_ids`** (limite 50k
 | `figures/performance_comparison.png` | Ray vs Dask (3 runs; Dask run 1 isolada, hachurada) |
 | `figures/iteration_times.png` | Tempo por iteracao LPA |
 | `figures/convergence_changed_nodes.png` | Nós que mudam de rotulo por iteracao |
-| `../docs/assets/lpa-two-communities.svg` | Exemplo conceptual (problema) |
 | `../docs/assets/lpa-propagation-iterations.png` | LPA por iteracao (Neo4j) |
 
 **Gerado com:** `python scripts/generate_results_report.py`
