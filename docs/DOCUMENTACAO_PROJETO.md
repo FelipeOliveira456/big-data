@@ -87,8 +87,8 @@ Implementação em `graph/modularity.py`.
 
 | Atributo | Valor |
 |----------|-------|
-| Fonte | [SNAP — soc-Orkut](https://snap.stanford.edu/data/soc-Orkut.html) |
-| Arquivo | `data/raw/soc-orkut-relationships.txt` |
+| Fonte | [SNAP — com-Orkut](https://snap.stanford.edu/data/com-Orkut.html) |
+| Arquivo local | `data/raw/soc-orkut-relationships.txt` (baixado de `com-orkut.ungraph.txt.gz`) |
 | Nós (~100%) | ~3.072.441 |
 | Arestas não direcionadas (SNAP) | ~117,2M |
 | Arcos CSR (simetrizados) | ~234M |
