@@ -3,7 +3,7 @@
 set -euo pipefail
 cd /app
 
-: "${GRAPH_RAW_PATH:=data/raw/soc-pokec-relationships.txt}"
+: "${GRAPH_RAW_PATH:=data/raw/soc-orkut-relationships.txt}"
 : "${BENCHMARK_FRACTIONS:=100}"
 : "${BENCHMARK_RUNS:=3}"
 : "${BENCHMARK_STAMP:=}"

@@ -53,6 +53,14 @@ def test_read_edges_coo_keeps_directed_arcs(tmp_path: Path):
     raw = tmp_path / "raw.txt"
     raw.write_text("1 2\n2 3\n3 1\n")
     assert len(list(iter_directed_edges(raw))) == 3
-    src, dst = read_edges_coo(raw)
+    src, dst = read_edges_coo(raw, directed=True)
     assert len(src) == 3
     assert list(zip(src.tolist(), dst.tolist())) == [(1, 2), (2, 3), (3, 1)]
+
+
+def test_read_edges_coo_symmetrizes_undirected(tmp_path: Path):
+    raw = tmp_path / "raw.txt"
+    raw.write_text("1 2\n2 3\n")
+    src, dst = read_edges_coo(raw, directed=False)
+    pairs = sorted(zip(src.tolist(), dst.tolist()))
+    assert pairs == [(1, 2), (2, 1), (2, 3), (3, 2)]

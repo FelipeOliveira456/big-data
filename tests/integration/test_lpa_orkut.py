@@ -1,7 +1,7 @@
-"""LPA integration: precomputed Pokec 0.1% fixture → benchmark → report.
+"""LPA integration: precomputed Orkut 0.1% fixture → benchmark → report.
 
-  pytest tests/integration/test_lpa_pokec.py -m integration -v -s
-  pytest tests/integration/test_lpa_pokec.py -m integration -v -s --backend ray
+  pytest tests/integration/test_lpa_orkut.py -m integration -v -s
+  pytest tests/integration/test_lpa_orkut.py -m integration -v -s --backend ray
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ def _assert_memory_metrics(rows: list[dict[str, str]]) -> None:
 
 
 @pytest.mark.integration
-def test_lpa_pokec_pipeline(
+def test_lpa_orkut_pipeline(
     integration_workspace: IntegrationWorkspace,
     integration_approaches: list[str],
 ):
@@ -56,8 +56,8 @@ def test_lpa_pokec_pipeline(
     assert ws.metrics_csv.is_file()
     assert ws.run_log.is_file()
     log_body = ws.run_log.read_text(encoding="utf-8")
-    assert "dataset_slug=pokec" in log_body
-    assert "pokec_0p1pct.npz" in log_body
+    assert "dataset_slug=orkut" in log_body
+    assert "orkut_0p1pct.npz" in log_body
     if "ray" in approaches:
         assert "[ray][start]" in log_body
         assert "[ray][done]" in log_body
@@ -84,7 +84,7 @@ def test_lpa_pokec_pipeline(
     assert ws.comparison_md.is_file()
 
     print(
-        f"\n=== LPA 0.1% Pokec fixture ({approaches}) ===\n"
+        f"\n=== LPA 0.1% Orkut fixture ({approaches}) ===\n"
         f"  Nodes: {FIXTURE_NODE_COUNT:,}  Edges: {FIXTURE_EDGE_COUNT:,}\n"
         f"  Communities: {[int(r['num_communities']) for r in rows]}\n"
         f"  Algo (s): {[round(float(r['algorithm_time_s']), 1) for r in rows]}\n"

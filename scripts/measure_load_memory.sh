@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Load Pokec fraction and print measured RSS + CSR estimate.
+# Load Orkut fraction and print measured RSS + CSR estimate.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -9,7 +9,7 @@ if [[ -d .venv ]]; then
 fi
 
 FRACTION="${1:-0.1}"
-RAW="${GRAPH_RAW_PATH:-data/raw/soc-pokec-relationships.txt}"
+RAW="${GRAPH_RAW_PATH:-data/raw/soc-orkut-relationships.txt}"
 
 python - <<PY
 from pathlib import Path

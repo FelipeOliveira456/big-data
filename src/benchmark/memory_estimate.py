@@ -1,4 +1,4 @@
-"""Extrapolate time/RAM from measured fractions to 100% Pokec (single host)."""
+"""Extrapolate time/RAM from measured fractions to 100% Orkut (single host)."""
 
 from __future__ import annotations
 
@@ -6,9 +6,7 @@ import math
 from dataclasses import dataclass
 
 # Measured integration runs (laptop, LocalCluster 3 workers, max_iter=50).
-# 0.1% and 10% calibrate extrapolate_time_to_100; 10% alone calibrates
-# 10% calibrates estimate_host_memory (driver + local worker RSS).
-# Sources: tests/integration/output/benchmark/metrics_raw_20260620T*.csv
+# Calibrated on soc-Pokec fractions; scaled to Orkut 100% by edge count.
 _CALIBRATION = (
     {
         "fraction_pct": 0.1,
@@ -34,10 +32,17 @@ _CALIBRATION = (
     },
 )
 
-POKEC_100_NODE_COUNT = 1_632_803
-POKEC_100_EDGE_COUNT = 22_301_964
-POKEC_100_EDGE_COUNT_LOW = 22_000_000
-POKEC_100_EDGE_COUNT_HIGH = 22_301_964
+ORKUT_100_NODE_COUNT = 3_072_441
+# Undirected SNAP lines symmetrized to out-CSR (both directions stored).
+ORKUT_100_EDGE_COUNT = 234_370_166
+ORKUT_100_EDGE_COUNT_LOW = 234_000_000
+ORKUT_100_EDGE_COUNT_HIGH = 234_370_166
+
+# Backward-compatible aliases for tests/tools that still import Pokec names.
+POKEC_100_NODE_COUNT = ORKUT_100_NODE_COUNT
+POKEC_100_EDGE_COUNT = ORKUT_100_EDGE_COUNT
+POKEC_100_EDGE_COUNT_LOW = ORKUT_100_EDGE_COUNT_LOW
+POKEC_100_EDGE_COUNT_HIGH = ORKUT_100_EDGE_COUNT_HIGH
 
 
 @dataclass(frozen=True)
@@ -95,9 +100,9 @@ class FullEstimate:
 
 
 def estimate_load_time_s(edge_count: int) -> tuple[float, float]:
-    """Rough SNAP TXT→CSR load time (single-pass read; ~750 MB Pokec file)."""
-    ref_edges = POKEC_100_EDGE_COUNT
-    ref_s = 90.0
+    """Rough SNAP TXT→CSR load time (single-pass read; ~4.6 GB Orkut file)."""
+    ref_edges = ORKUT_100_EDGE_COUNT
+    ref_s = 420.0
     ratio = edge_count / ref_edges
     return ref_s * ratio * 0.7, ref_s * ratio * 1.4
 
@@ -126,8 +131,8 @@ def estimate_csr_bytes(node_count: int, edge_count: int) -> GraphMemoryBytes:
 
 def extrapolate_time_to_100(
     *,
-    edge_count_low: int = POKEC_100_EDGE_COUNT_LOW,
-    edge_count_high: int = POKEC_100_EDGE_COUNT_HIGH,
+    edge_count_low: int = ORKUT_100_EDGE_COUNT_LOW,
+    edge_count_high: int = ORKUT_100_EDGE_COUNT_HIGH,
 ) -> TimeEstimate:
     small, large = _CALIBRATION[0], _CALIBRATION[1]
 
@@ -199,7 +204,6 @@ def estimate_for_fraction(
     if fraction_pct >= 100:
         time_est = extrapolate_time_to_100()
     else:
-        # Scale from 10% calibration point linearly in edges (upper bound).
         ref = _CALIBRATION[1]
         ratio = edge_count / ref["edge_count"]
         time_est = TimeEstimate(
@@ -212,7 +216,7 @@ def estimate_for_fraction(
     cluster = estimate_host_memory(node_count, edge_count)
     notes = (
         "Tempos extrapolados de integração 0,1% e 10% (lei de potência em arestas).",
-        "Carga: TXT → numpy COO → out-CSR; sem SQLite/Parquet.",
+        "Carga: TXT → numpy COO → out-CSR; undirected SNAP é simetrizado na carga.",
         "Memória: driver + workers locais na mesma VM (Ray/Dask em fases separadas).",
         "Workers/chunks: auto = CPU count (`LPA_WORKERS` para fixar).",
     )
@@ -236,11 +240,11 @@ def format_estimate_report(est: FullEstimate) -> str:
     dask_lo, dask_hi = t.dask_minutes
     load_lo, load_hi = estimate_load_time_s(est.edge_count)
     lines = [
-        f"=== Estimativa {est.fraction_pct:g}% Pokec ===",
-        f"  Nós: {est.node_count:,}  Arestas direcionadas: {est.edge_count:,}",
+        f"=== Estimativa {est.fraction_pct:g}% Orkut ===",
+        f"  Nós: {est.node_count:,}  Arestas CSR: {est.edge_count:,}",
         f"  CSR estável: {g.csr_steady_mb:.0f} MB  |  Pico carga TXT→CSR: {g.load_peak_mb:.0f} MB",
         f"  Tempo carga: {load_lo:.0f}–{load_hi:.0f} s",
-        f"  Tempo algo (50 iter): Ray {ray_lo:.0f}–{ray_hi:.0f} min | Dask {dask_lo:.0f}–{dask_hi:.0f} min",
+        f"  Tempo algo (100 iter): Ray {ray_lo:.0f}–{ray_hi:.0f} min | Dask {dask_lo:.0f}–{dask_hi:.0f} min",
         "  --- Memória (mesma VM) ---",
         f"  Pico carga TXT→CSR:        ~{c.load_peak_mb:.0f} MB",
         f"  Driver Ray (est.):         ~{c.driver_ray_mb:.0f} MB",

@@ -129,7 +129,8 @@ def write_log_header(
     log_file.write(f"dataset_slug={cfg.dataset_slug}\n")
     log_file.write(f"graph={graph_path}\n")
     log_file.write(
-        f"ray_num_cpus={cfg.ray_num_cpus} lpa_chunk_divisor={cfg.lpa_chunk_divisor}\n"
+        f"ray_num_cpus={cfg.ray_num_cpus} lpa_chunk_divisor={cfg.lpa_chunk_divisor} "
+        f"graph_directed={cfg.graph_directed}\n"
     )
     log_file.write(
         f"dask_n_workers={cfg.dask_n_workers} "

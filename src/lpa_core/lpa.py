@@ -263,7 +263,7 @@ def count_label_changes(labels: np.ndarray, snapshot: np.ndarray) -> int:
 
 def run_lpa_sequential(
     graph: Graph,
-    max_iter: int = 30,
+    max_iter: int = 100,
     seed: int = 42,
     log_fn: Callable[[str], None] | None = None,
 ) -> LpaResult:

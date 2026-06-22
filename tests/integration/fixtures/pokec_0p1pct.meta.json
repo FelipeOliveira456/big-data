@@ -1,9 +1,0 @@
-{
-  "dataset_slug": "pokec",
-  "fraction_pct": 0.1,
-  "seed": 42,
-  "node_count": 1632,
-  "edge_count": 3910,
-  "source": "data/raw/soc-pokec-relationships.txt",
-  "load_time_s_build": 215.30442531900007
-}

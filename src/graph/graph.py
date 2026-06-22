@@ -20,6 +20,19 @@ def _unique_union_sorted(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.union1d(np.unique(a), np.unique(b))
 
 
+def symmetrize_coo(
+    src: np.ndarray,
+    dst: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Duplicate each arc in reverse (undirected SNAP line → out-CSR for LPA)."""
+    if src.size == 0:
+        return src, dst
+    return (
+        np.concatenate([src, dst]),
+        np.concatenate([dst, src]),
+    )
+
+
 def _dedupe_directed_edges(
     src: np.ndarray,
     dst: np.ndarray,
@@ -99,7 +112,7 @@ class Graph:
     Directed simple graph in out-CSR form.
 
     ``neighbor_indices(u)`` returns out-neighbors of ``u`` (LPA votes on
-    outgoing arcs, matching soc-Pokec SNAP semantics).
+    stored arcs; undirected SNAP graphs are symmetrized at load time).
     """
 
     node_ids: np.ndarray

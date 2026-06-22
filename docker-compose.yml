@@ -7,7 +7,8 @@ services:
       - ./reports:/app/reports
       - ./config.yaml.example:/app/config.yaml:ro
     environment:
-      GRAPH_RAW_PATH: data/raw/soc-pokec-relationships.txt
+      GRAPH_RAW_PATH: data/raw/soc-orkut-relationships.txt
+      LPA_MAX_ITER: "100"
       BENCHMARK_FRACTIONS: "100"
       BENCHMARK_RUNS: "3"
       BENCHMARK_BACKEND: both

@@ -9,11 +9,12 @@ from config import AppConfig
 def _cfg(seed: int = 42) -> AppConfig:
     return AppConfig(
         graph_raw_path=__import__("pathlib").Path("data/raw/x.txt"),
-        dataset_slug="pokec",
+        dataset_slug="orkut",
         reports_dir=__import__("pathlib").Path("reports"),
         seed=seed,
         lpa_max_iter=50,
         lpa_chunk_divisor=3,
+        graph_directed=False,
         ray_num_cpus=None,
         dask_n_workers=None,
         ray_head_address=None,

@@ -1,8 +1,8 @@
-# Distributed Label Propagation (soc-Pokec)
+# Distributed Label Propagation (soc-Orkut)
 
 Trabalho de Big Data: detecção de comunidades com **Label Propagation** distribuído — **Ray** vs **Dask**.
 
-**Dataset:** [soc-Pokec](https://snap.stanford.edu/data/soc-Pokec.html) (~1,63M nós LCC, ~22M arestas direcionadas). Integração usa **0,1%** (~1,6k nós).
+**Dataset:** [soc-Orkut](https://snap.stanford.edu/data/soc-Orkut.html) (~3,07M nós, ~117M arestas **não direcionadas**; CSR simetrizado na carga). Integração usa fixture **0,1%** (~1,6k nós).
 
 ## Documentação
 
@@ -15,8 +15,8 @@ Trabalho de Big Data: detecção de comunidades com **Label Propagation** distri
 | Modo | O que precisa |
 |------|----------------|
 | **Desenvolvimento / QA** | Python **3.11+**, venv, `pip install -e ".[dev]"` |
-| **Produção (1 VM)** | Docker + ~6–8 GB RAM para Pokec 100% |
-| **Testes E2E** | venv + fixture `pokec_0p1pct.npz` |
+| **Produção (1 VM)** | Docker + **16+ GB RAM** recomendado para Orkut 100% |
+| **Testes E2E** | venv + fixture `orkut_0p1pct.npz` |
 
 ---
 
@@ -26,6 +26,7 @@ Trabalho de Big Data: detecção de comunidades com **Label Propagation** distri
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cp config.yaml.example config.yaml   # opcional
+bash scripts/build_integration_fixture.sh   # gera orkut_0p1pct.npz se ausente
 ```
 
 Workers e chunks LPA: **auto = número de CPUs** (`LPA_WORKERS=4` para fixar).
@@ -45,10 +46,10 @@ make qa-check    # só lint
 
 ```bash
 pytest tests/unit/ -v
-pytest tests/integration/test_lpa_pokec.py -m integration -v -s
+pytest tests/integration/test_lpa_orkut.py -m integration -v -s
 ```
 
-Fixture: `bash scripts/build_integration_fixture.sh` (requer raw Pokec).
+Fixture: `bash scripts/build_integration_fixture.sh` (usa raw Orkut ou grafo sintético).
 
 ---
 
@@ -56,7 +57,7 @@ Fixture: `bash scripts/build_integration_fixture.sh` (requer raw Pokec).
 
 ```bash
 bash scripts/download_dataset.sh
-python -m cli.main benchmark --input data/raw/soc-pokec-relationships.txt --fractions 100 --runs 3
+python -m cli.main benchmark --input data/raw/soc-orkut-relationships.txt --fractions 100 --runs 3
 python -m cli.main report
 ```
 
@@ -81,6 +82,7 @@ Volumes: `./data`, `./reports`. Env no `docker-compose.yml`:
 | `BENCHMARK_FRACTIONS` | `100` |
 | `BENCHMARK_RUNS` | `3` |
 | `BENCHMARK_BACKEND` | `both` (Ray → Dask → report) |
+| `LPA_MAX_ITER` | `100` |
 | `LPA_WORKERS` | auto (CPUs do container) |
 
 Build ARM (Oracle Ampere): `docker build -t distributed-lpa:latest .`

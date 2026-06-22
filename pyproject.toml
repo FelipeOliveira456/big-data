@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "distributed-lpa"
 version = "0.2.0"
-description = "Distributed Label Propagation on soc-Pokec (Ray vs Dask)"
+description = "Distributed Label Propagation on soc-Orkut (Ray vs Dask)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

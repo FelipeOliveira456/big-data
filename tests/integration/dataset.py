@@ -1,4 +1,4 @@
-"""Workspace and constants for soc-Pokec integration tests (0.1% fixture)."""
+"""Workspace and constants for soc-Orkut integration tests (0.1% fixture)."""
 
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ from config import REPO_ROOT
 if TYPE_CHECKING:
     from config import AppConfig
 
-FIXTURE_PATH = REPO_ROOT / "tests" / "integration" / "fixtures" / "pokec_0p1pct.npz"
+FIXTURE_PATH = REPO_ROOT / "tests" / "integration" / "fixtures" / "orkut_0p1pct.npz"
 OUTPUT_DIR = REPO_ROOT / "tests" / "integration" / "output"
 SEED = 42
-DATASET_SLUG = "pokec"
+DATASET_SLUG = "orkut"
 FRACTION_PCT = 0.1
-# From pokec_0p1pct fixture (seed=42, BFS 0.1% on soc-Pokec LCC)
+# From orkut_0p1pct fixture (seed=42; synthetic BA if raw Orkut absent)
 FIXTURE_NODE_COUNT = 1_632
-FIXTURE_EDGE_COUNT = 3_910
+FIXTURE_EDGE_COUNT = 9_774
 
 
 @dataclass

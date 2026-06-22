@@ -4,7 +4,7 @@
 
 **Repositório:** [FelipeOliveira456/big-data](https://github.com/FelipeOliveira456/big-data)  
 **Pacote Python:** `distributed-lpa`  
-**Dataset:** soc-Pokec (SNAP, grafo direcionado)  
+**Dataset:** soc-Orkut (SNAP, grafo **não direcionado**; simetrizado na carga)  
 **Abordagens:** Ray vs Dask (LPA síncrono distribuído)
 
 ---
@@ -14,7 +14,7 @@
 1. [Visão geral](#1-visão-geral)
 2. [Objetivos](#2-objetivos)
 3. [O algoritmo LPA](#3-o-algoritmo-lpa)
-4. [Dataset soc-Pokec](#4-dataset-soc-pokec)
+4. [Dataset soc-Orkut](#4-dataset-soc-orkut)
 5. [Arquitetura do software](#5-arquitetura-do-software)
 6. [Estrutura de diretórios](#6-estrutura-de-diretórios)
 7. [Módulos e responsabilidades](#7-módulos-e-responsabilidades)
@@ -48,7 +48,7 @@ A lógica central (iteração LPA, modularidade Q) fica em `lpa_core/` e `graph/
 
 ## 2. Objetivos
 
-1. Detectar comunidades na rede **soc-Pokec** (~1,63M nós LCC, ~22M arestas direcionadas).
+1. Detectar comunidades na rede **soc-Orkut** (~3,07M nós, ~117M arestas não direcionadas → ~234M arcos CSR).
 2. Comparar **desempenho** (tempo, memória RSS, throughput) e **qualidade** (modularidade Q, número de comunidades).
 3. Executar numa **única VM** (local ou Docker); integração E2E usa fixture **0,1%** (~1,6k nós).
 4. Fornecer **testes unitários**, integração E2E e pipeline **Docker**.
@@ -69,7 +69,7 @@ Referência: Raghavan, Albert & Kumara (2007).
 ### Critério de parada
 
 - Convergência quando **nenhum nó muda de rótulo** numa iteração, ou
-- `max_iter` atingido (padrão **30**).
+- `max_iter` atingido (padrão **100**).
 
 Não há número inicial de clusters *K* — o LPA descobre comunidades pelo consenso local.
 
@@ -83,22 +83,23 @@ Implementação em `graph/modularity.py`.
 
 ---
 
-## 4. Dataset soc-Pokec
+## 4. Dataset soc-Orkut
 
 | Atributo | Valor |
 |----------|-------|
-| Fonte | [SNAP — soc-Pokec](https://snap.stanford.edu/data/soc-Pokec.html) |
-| Arquivo | `data/raw/soc-pokec-relationships.txt` |
-| Nós (LCC, ~100%) | ~1.632.803 |
-| Arestas direcionadas (LCC) | ~22,3M |
-| Tamanho raw | ~850 MB (descomprimido) |
+| Fonte | [SNAP — soc-Orkut](https://snap.stanford.edu/data/soc-Orkut.html) |
+| Arquivo | `data/raw/soc-orkut-relationships.txt` |
+| Nós (~100%) | ~3.072.441 |
+| Arestas não direcionadas (SNAP) | ~117,2M |
+| Arcos CSR (simetrizados) | ~234M |
+| Tamanho raw | ~4,6 GB (descomprimido) |
 
 ### Tratamento na carga
 
 1. Ignorar cabeçalho e linhas inválidas.
-2. Grafo **direcionado**: uma aresta `u → v` por linha do SNAP (A declara amizade com B).
+2. Grafo **não direcionado**: cada linha `u v` gera arcos `u→v` e `v→u` (simetrização em numpy, uma passagem).
 3. Remover self-loops e duplicatas `(src, dst)`.
-4. Grafos grandes: amostra **BFS conectada** por fração (seed **42**) sobre a LCC.
+4. Grafos grandes: amostra **BFS conectada** por fração (seed **42**); BFS trata arestas como não direcionadas.
 5. Subgrafo **induzido**; construção **out-CSR** em memória (numpy).
 
 Não há pipeline Parquet nem artefatos intermediários em produção — o benchmark lê o TXT diretamente.
@@ -107,15 +108,15 @@ Não há pipeline Parquet nem artefatos intermediários em produção — o benc
 
 | Atributo | Valor |
 |----------|-------|
-| Ficheiro | `tests/integration/fixtures/pokec_0p1pct.npz` |
+| Ficheiro | `tests/integration/fixtures/orkut_0p1pct.npz` |
 | Nós | 1.632 |
-| Arestas direcionadas | 3.910 |
-| Metadados | `pokec_0p1pct.meta.json` |
+| Arcos CSR | ~9.774 |
+| Metadados | `orkut_0p1pct.meta.json` |
 
 Gerar com:
 
 ```bash
-bash scripts/download_dataset.sh
+bash scripts/download_dataset.sh   # opcional para fixture sintético
 bash scripts/build_integration_fixture.sh
 ```
 
@@ -124,7 +125,7 @@ bash scripts/build_integration_fixture.sh
 ## 5. Arquitetura do software
 
 ```text
-soc-pokec-relationships.txt (SNAP)
+soc-orkut-relationships.txt (SNAP)
        |
        v
 preprocessing/load_graph.py  -->  out-CSR em memória (Graph)
@@ -166,9 +167,9 @@ big-data/
 │   └── config.py           # Config YAML + env vars
 ├── tests/
 │   ├── unit/               # pytest (85 testes)
-│   └── integration/        # E2E Pokec 0,1% (fixture .npz)
+│   └── integration/        # E2E Orkut 0,1% (fixture .npz)
 ├── data/
-│   └── raw/                # soc-pokec-relationships.txt (gitignored)
+│   └── raw/                # soc-orkut-relationships.txt (gitignored)
 ├── reports/                # Saídas locais timestampadas (gitignored)
 ├── scripts/                # download, docker, QA, fixture
 ├── docs/                   # Esta documentação
@@ -275,7 +276,7 @@ O parâmetro `--input` aceita o TXT SNAP ou um `.npz`. A fração (`--fraction` 
 
 ```bash
 python -m cli.main lpa-ray \
-  --input data/raw/soc-pokec-relationships.txt \
+  --input data/raw/soc-orkut-relationships.txt \
   --fraction 100
 ```
 
@@ -299,7 +300,7 @@ Mesma lógica de chunks e snapshot síncrono que Ray, via `Client.submit`.
 
 ```bash
 python -m cli.main lpa-dask \
-  --input data/raw/soc-pokec-relationships.txt \
+  --input data/raw/soc-orkut-relationships.txt \
   --fraction 100
 ```
 
@@ -338,7 +339,7 @@ Colunas principais:
 ### Markdown (`reports/comparison_YYYYMMDDTHHMMSS.md`)
 
 ```bash
-python -m cli.main benchmark --input data/raw/soc-pokec-relationships.txt --fractions 100 --runs 3
+python -m cli.main benchmark --input data/raw/soc-orkut-relationships.txt --fractions 100 --runs 3
 python -m cli.main report
 ```
 
@@ -359,10 +360,11 @@ Com `--append`, reutiliza o stamp da run anterior (útil no Docker quando Ray e 
 
 | Chave / env | Padrão | Descrição |
 |-------------|--------|-----------|
-| `graph_raw_path` / `GRAPH_RAW_PATH` | `data/raw/soc-pokec-relationships.txt` | Ficheiro SNAP |
-| `dataset_slug` | `pokec` | Prefixo nos nomes de partição |
+| `graph_raw_path` / `GRAPH_RAW_PATH` | `data/raw/soc-orkut-relationships.txt` | Ficheiro SNAP |
+| `dataset_slug` | `orkut` | Prefixo nos nomes de partição |
 | `seed` / `SEED` | `42` | Semente base (amostra + LPA) |
-| `lpa_max_iter` / `LPA_MAX_ITER` | `30` | Máximo de iterações |
+| `lpa_max_iter` / `LPA_MAX_ITER` | `100` | Máximo de iterações |
+| `graph_directed` / `GRAPH_DIRECTED` | `false` | `true` = SNAP direcionado (sem simetrizar) |
 | `lpa_chunk_divisor` / `LPA_CHUNK_DIVISOR` | auto (CPUs) | Número de chunks por iteração |
 | `LPA_WORKERS` | — | Fixa workers e chunk divisor |
 | `ray_num_cpus` / `RAY_NUM_CPUS` | auto | CPUs Ray (local) |
@@ -400,7 +402,7 @@ Volumes: `./data`, `./reports`. Config montada de `config.yaml.example`.
 
 | Variável | Default | Descrição |
 |----------|---------|-----------|
-| `GRAPH_RAW_PATH` | `data/raw/soc-pokec-relationships.txt` | Grafo SNAP |
+| `GRAPH_RAW_PATH` | `data/raw/soc-orkut-relationships.txt` | Grafo SNAP |
 | `BENCHMARK_FRACTIONS` | `100` | Fração percentual (100 = grafo completo LCC) |
 | `BENCHMARK_RUNS` | `3` | Repetições |
 | `BENCHMARK_BACKEND` | `both` | `ray` → `dask` → `report` |
@@ -424,12 +426,12 @@ pip install -e ".[dev]"
 ```bash
 pytest tests/unit/ -v
 pytest tests/integration/ -m integration -v -s
-pytest tests/integration/test_lpa_pokec.py -m integration -v -s --backend ray
+pytest tests/integration/test_lpa_orkut.py -m integration -v -s --backend ray
 ```
 
 E2E grava em `tests/integration/output/` (não toca em `reports/`).
 
-Fixture: `bash scripts/build_integration_fixture.sh` (requer raw Pokec).
+Fixture: `bash scripts/build_integration_fixture.sh` (raw Orkut ou sintético).
 
 ### QA
 
@@ -455,9 +457,9 @@ bash scripts/run_qa.sh
 
 Carga grande usa passagem streaming sobre o TXT — evita duplicar o grafo inteiro em COO antes da amostra.
 
-### VM recomendada (100% Pokec)
+### VM recomendada (100% Orkut)
 
-- **6–8 GB RAM** para benchmark completo Ray + Dask em sequência.
+- **16+ GB RAM** para benchmark completo Ray + Dask em sequência (CSR ~234M arcos).
 - CPUs: quanto mais, mais chunks paralelos (auto-detectado).
 
 Estimativas detalhadas: `benchmark/memory_estimate.py` (calibrado com runs 0,1% e 10%).
@@ -468,7 +470,7 @@ Estimativas detalhadas: `benchmark/memory_estimate.py` (calibrado com runs 0,1% 
 
 | Decisão | Motivo |
 |---------|--------|
-| soc-Pokec direcionado | Grafo grande realista; arestas `u→v` como no SNAP |
+| soc-Orkut não direcionado | Grafo maior; simetrização na carga (numpy, uma passagem) |
 | out-CSR | Vizinhança O(grau) para propagação de rótulos |
 | Carga TXT → CSR em memória | Menos I/O e disco que pipeline Parquet intermediário |
 | LPA síncrono + snapshot | Mesmo modelo mental Ray/Dask; comparável e testável |

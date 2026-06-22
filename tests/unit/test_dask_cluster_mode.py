@@ -12,12 +12,13 @@ from graph.graph import Graph
 
 def _cfg(**kwargs) -> AppConfig:
     defaults = dict(
-        graph_raw_path=Path("data/raw/soc-pokec-relationships.txt"),
-        dataset_slug="pokec",
+        graph_raw_path=Path("data/raw/soc-orkut-relationships.txt"),
+        dataset_slug="orkut",
         reports_dir=Path("reports"),
         seed=42,
         lpa_max_iter=50,
         lpa_chunk_divisor=12,
+        graph_directed=False,
         ray_num_cpus=None,
         dask_n_workers=3,
         ray_head_address=None,

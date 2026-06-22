@@ -41,7 +41,7 @@ def generate_report(input_csv: Path, output_md: Path) -> Path:
         "",
         "## Resumo",
         "",
-        "Comparação de Label Propagation distribuído no dataset soc-Pokec (carga direta do SNAP).",
+        "Comparação de Label Propagation distribuído no dataset soc-Orkut (carga direta do SNAP).",
         "",
         "## Desempenho (média ± desvio)",
         "",

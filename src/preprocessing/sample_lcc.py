@@ -9,7 +9,7 @@ from pathlib import Path
 
 import networkx as nx
 
-from preprocessing.load_snap import collect_node_set, is_large_raw, iter_directed_edges
+from preprocessing.load_snap import collect_node_set, is_large_raw, iter_snap_edges
 
 
 def sample_connected_node_ids(
@@ -87,7 +87,7 @@ def sample_connected_node_ids_streaming(
                 flush=True,
             )
         next_frontier: set[int] = set()
-        for u, v in iter_directed_edges(path):
+        for u, v in iter_snap_edges(path):
             if u in frontier and v in lcc_set and v not in visited:
                 next_frontier.add(v)
             elif v in frontier and u in lcc_set and u not in visited:
@@ -117,7 +117,7 @@ def collect_lcc_node_ids(raw_path: Path) -> list[int] | set[int]:
     if is_large_raw(raw_path):
         return collect_node_set(raw_path)
 
-    edges = list(iter_directed_edges(raw_path))
+    edges = list(iter_snap_edges(raw_path))
     lcc_edges, _ = extract_lcc(edges)
     nodes = {s for s, _ in lcc_edges} | {d for _, d in lcc_edges}
     return sorted(nodes)

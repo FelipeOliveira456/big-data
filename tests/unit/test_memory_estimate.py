@@ -29,6 +29,6 @@ def test_extrapolate_time_to_100_between_linear_and_edges():
 def test_estimate_for_fraction_100_report():
     est = estimate_for_fraction(100, POKEC_100_NODE_COUNT, POKEC_100_EDGE_COUNT)
     text = format_estimate_report(est)
-    assert "Pokec" in text
+    assert "Orkut" in text
     assert "Process tree Ray" in text
     assert est.cluster.process_tree_ray_mb > est.cluster.driver_ray_mb

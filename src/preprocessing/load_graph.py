@@ -10,7 +10,7 @@ from graph.graph import Graph
 from preprocessing.load_snap import (
     graph_from_snap_file,
     is_large_raw,
-    iter_directed_edges,
+    iter_snap_edges,
     read_edges_coo_subset,
 )
 from preprocessing.sample_lcc import (
@@ -36,14 +36,15 @@ def load_graph_from_snap(
     *,
     fraction_pct: float = 100.0,
     seed: int = 42,
+    directed: bool = False,
 ) -> GraphLoadResult:
-    """Read a SNAP directed edge list and build an in-memory out-CSR graph."""
+    """Read a SNAP edge list and build an in-memory out-CSR graph."""
     path = Path(path)
     t0 = time.perf_counter()
 
     if not is_large_raw(path):
         lcc_nodes = collect_lcc_node_ids(path)
-        all_edges = list(iter_directed_edges(path))
+        all_edges = list(iter_snap_edges(path))
         if fraction_pct >= 100:
             sampled = set(lcc_nodes)
         else:
@@ -52,9 +53,12 @@ def load_graph_from_snap(
             )
         induced = induced_edges(all_edges, sampled)
         lcc_edges, _dropped = extract_lcc(induced)
-        graph = Graph.from_edges(lcc_edges)
+        if directed:
+            graph = Graph.from_edges(lcc_edges)
+        else:
+            graph = Graph.from_undirected_edges(lcc_edges)
     elif fraction_pct >= 100:
-        graph = graph_from_snap_file(path)
+        graph = graph_from_snap_file(path, directed=directed)
     else:
         print(
             f"[load] collecting node ids from {path.name} (1 pass over edge list) ...",
@@ -69,7 +73,7 @@ def load_graph_from_snap(
             f"[load] sampled {len(sampled):,} nodes — extracting induced edges ...",
             flush=True,
         )
-        src, dst = read_edges_coo_subset(path, sampled)
+        src, dst = read_edges_coo_subset(path, sampled, directed=directed)
         graph = (
             Graph.from_coo(src, dst) if src.size > 0 else Graph.from_nodes([])
         )

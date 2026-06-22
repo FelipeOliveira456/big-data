@@ -64,7 +64,7 @@ def _wait_for_ray_workers(expected: int, timeout_s: float = 120.0) -> int:
 
 def run_lpa_ray(
     graph: Graph,
-    max_iter: int = 30,
+    max_iter: int = 100,
     chunk_divisor: int = 12,
     num_cpus: int | None = None,
     ray_head_address: str | None = None,

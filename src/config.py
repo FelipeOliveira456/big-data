@@ -20,6 +20,7 @@ class AppConfig:
     seed: int
     lpa_max_iter: int
     lpa_chunk_divisor: int
+    graph_directed: bool
     ray_num_cpus: int | None
     dask_n_workers: int | None
     ray_head_address: str | None
@@ -65,6 +66,14 @@ def _optional_str(value: Any) -> str | None:
     return str(value)
 
 
+def _bool(value: Any, default: bool) -> bool:
+    if value is None or value == "" or value == "null":
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() in ("1", "true", "yes", "on")
+
+
 def _int_or_workers(value: Any) -> int:
     if value is None or value == "" or value == "null":
         return resolve_worker_count()
@@ -92,6 +101,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
             "seed": "SEED",
             "lpa_max_iter": "LPA_MAX_ITER",
             "lpa_chunk_divisor": "LPA_CHUNK_DIVISOR",
+            "graph_directed": "GRAPH_DIRECTED",
             "ray_num_cpus": "RAY_NUM_CPUS",
             "dask_n_workers": "DASK_N_WORKERS",
             "ray_head_address": "RAY_HEAD_ADDRESS",
@@ -102,12 +112,13 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         return raw.get(key, default)
 
     return AppConfig(
-        graph_raw_path=Path(get("graph_raw_path", "data/raw/soc-pokec-relationships.txt")),
-        dataset_slug=str(get("dataset_slug", "pokec")),
+        graph_raw_path=Path(get("graph_raw_path", "data/raw/soc-orkut-relationships.txt")),
+        dataset_slug=str(get("dataset_slug", "orkut")),
         reports_dir=Path(get("reports_dir", "reports")),
         seed=int(get("seed", 42)),
-        lpa_max_iter=int(get("lpa_max_iter", 30)),
+        lpa_max_iter=int(get("lpa_max_iter", 100)),
         lpa_chunk_divisor=_int_or_workers(get("lpa_chunk_divisor", None)),
+        graph_directed=_bool(get("graph_directed", False), default=False),
         ray_num_cpus=_optional_int(get("ray_num_cpus", None)),
         dask_n_workers=_optional_int(get("dask_n_workers", None)),
         ray_head_address=_optional_str(get("ray_head_address", None)),

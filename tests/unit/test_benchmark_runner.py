@@ -57,11 +57,12 @@ def test_run_benchmark_campaign_ray_only(tmp_path: Path, tiny_graph: Graph):
     out_csv = tmp_path / "metrics.csv"
     cfg = AppConfig(
         graph_raw_path=raw,
-        dataset_slug="pokec",
+        dataset_slug="orkut",
         reports_dir=tmp_path,
         seed=42,
         lpa_max_iter=50,
         lpa_chunk_divisor=12,
+        graph_directed=False,
         ray_num_cpus=1,
         dask_n_workers=2,
         ray_head_address=None,
@@ -98,11 +99,12 @@ def test_run_benchmark_campaign_filtered_approaches(tmp_path: Path, tiny_graph: 
     raw.write_text("0 1\n1 2\n0 2\n", encoding="utf-8")
     cfg = AppConfig(
         graph_raw_path=raw,
-        dataset_slug="pokec",
+        dataset_slug="orkut",
         reports_dir=tmp_path,
         seed=42,
         lpa_max_iter=50,
         lpa_chunk_divisor=12,
+        graph_directed=False,
         ray_num_cpus=1,
         dask_n_workers=2,
         ray_head_address=None,

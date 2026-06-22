@@ -299,7 +299,10 @@ def run_benchmark_campaign(
             else:
                 print(f"[benchmark] loading SNAP {frac}% from {graph_path} ...", flush=True)
                 loaded = load_graph_from_snap(
-                    graph_path, fraction_pct=frac, seed=cfg.seed
+                    graph_path,
+                    fraction_pct=frac,
+                    seed=cfg.seed,
+                    directed=cfg.graph_directed,
                 )
             frac_label = loaded.fraction_pct if is_artifact else frac
             print(

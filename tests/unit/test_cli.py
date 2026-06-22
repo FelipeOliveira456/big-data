@@ -128,11 +128,12 @@ def test_cmd_benchmark_append_reuses_latest_stamp(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(cli_main, "load_config", lambda: AppConfig(
         graph_raw_path=raw,
-        dataset_slug="pokec",
+        dataset_slug="orkut",
         reports_dir=reports,
         seed=42,
         lpa_max_iter=50,
         lpa_chunk_divisor=2,
+        graph_directed=False,
         ray_num_cpus=None,
         dask_n_workers=None,
         ray_head_address=None,

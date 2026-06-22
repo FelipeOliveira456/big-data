@@ -33,6 +33,8 @@ def _load_graph_for_cli(
     input_path: Path,
     fraction_pct: float,
     seed: int,
+    *,
+    directed: bool = False,
 ):
     print(
         f"[load] SNAP {fraction_pct}% from {input_path} ...",
@@ -40,7 +42,10 @@ def _load_graph_for_cli(
     )
     with track_memory_peaks() as mem:
         loaded = load_graph(
-            input_path, fraction_pct=fraction_pct, seed=seed
+            input_path,
+            fraction_pct=fraction_pct,
+            seed=seed,
+            directed=directed,
         )
     est = estimate_for_fraction(
         fraction_pct, loaded.node_count, loaded.edge_count
@@ -87,7 +92,12 @@ def _cmd_lpa(args: argparse.Namespace, run_fn) -> int:
         print(f"ERROR: input file not found: {input_path}", file=sys.stderr)
         return 1
     fraction = float(args.fraction if args.fraction is not None else 100.0)
-    loaded = _load_graph_for_cli(input_path, fraction, args.seed or cfg.seed)
+    loaded = _load_graph_for_cli(
+        input_path,
+        fraction,
+        args.seed or cfg.seed,
+        directed=cfg.graph_directed,
+    )
     res = run_fn(loaded.graph, args, cfg)
     _emit_lpa_result(res, args.output_partition)
     return 0

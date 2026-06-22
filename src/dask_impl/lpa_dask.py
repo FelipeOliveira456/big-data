@@ -70,7 +70,7 @@ def _connect_dask(
 
 def run_lpa_dask(
     graph: Graph,
-    max_iter: int = 30,
+    max_iter: int = 100,
     chunk_divisor: int = 12,
     n_workers: int | None = None,
     cfg: AppConfig | None = None,
