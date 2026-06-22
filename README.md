@@ -52,22 +52,6 @@ Grupos densamente ligados convergem rapidamente para o mesmo rótulo; regiões e
 
 **Qualidade final:** modularidade **Q** (Blondel et al., 2008) sobre a partição obtida.
 
-```mermaid
-sequenceDiagram
-  participant D as Driver
-  participant W1 as Worker chunk 1
-  participant W2 as Worker chunk N
-  D->>D: snapshot = labels.copy()
-  par Iteração paralela
-    D->>W1: chunk + snapshot
-    D->>W2: chunk + snapshot
-    W1-->>D: novos rótulos
-    W2-->>D: novos rótulos
-  end
-  D->>D: merge + contar mudanças
-  Note over D: para se changed=0 ou iter=max_iter
-```
-
 ---
 
 ## O que este projeto faz
