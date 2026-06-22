@@ -171,6 +171,7 @@ big-data/
 ├── data/
 │   └── raw/                # soc-orkut-relationships.txt (gitignored)
 ├── reports/                # Saídas locais timestampadas (gitignored)
+├── results/                # Relatório analítico + figuras (campanha arquivada)
 ├── scripts/                # download, docker, QA, fixture
 ├── docs/                   # Esta documentação
 ├── Dockerfile
@@ -344,6 +345,77 @@ python -m cli.main report
 ```
 
 Com `--append`, reutiliza o stamp da run anterior (útil no Docker quando Ray e Dask rodam em sequência).
+
+Relatório analítico completo (figuras + análise de desempenho): [`results/REPORT.md`](../results/REPORT.md).
+
+### Resultados experimentais — soc-Orkut 100%
+
+Campanha de referência **`20260622T005654`** (VM Docker, 6 vCPUs, ~16 GB RAM, 3 072 441 nós, 100 iter, seeds 42/43/44). Dados arquivados em `results/reports/`; gráficos em `results/figures/`.
+
+#### Resumo executivo
+
+| Métrica | Ray (3/3 OK) | Dask (2/3 OK) | Razão Ray/Dask |
+|---------|--------------|---------------|----------------|
+| Tempo médio do algoritmo | **648,8 s** ± 13,3 | 1280,9 s ± 32,2 | **~2,0×** |
+| Throughput | **4704 nós/s** ± 96 | 2400 nós/s ± 60 | **~2,0×** |
+| RSS pico (`peak_process_tree_rss_mb`) | **10,9 GB** ± 0,1 | 12,0 GB ± 0,1 | ~10% menos RAM |
+| Comunidades finais | 590 | 590 (runs OK) | **idênticas** |
+
+Ray entregou **100% de sucesso**; Dask run 1 falhou por **OOM do worker** (>95% do budget ~2,6 GiB/worker) após stress de memória das 3 runs Ray. Campanha Dask isolada `20260622T030138` completou com sucesso (1333 s algo, mesma partição).
+
+As partições finais são **equivalentes** entre Ray runs 1–3, Dask runs 2–3 e entre backends — inicialização LPA determinística por `node_id`.
+
+#### Desempenho por run
+
+| Run | Seed | Abordagem | Algoritmo (s) | Total (s) | Throughput | RSS pico |
+|-----|------|-----------|---------------|-----------|------------|----------|
+| 1 | 42 | Ray | 667,4 | 1035,6 | 4604 n/s | 11,1 GB |
+| 2 | 43 | Ray | 637,4 | 1004,3 | 4820 n/s | 10,8 GB |
+| 3 | 44 | Ray | 641,6 | 1008,2 | 4789 n/s | 10,8 GB |
+| 1 | 42 | Dask | — | **FALHOU** | — | OOM |
+| 2 | 43 | Dask | 1313,1 | 1682,0 | 2340 n/s | 11,9 GB |
+| 3 | 44 | Dask | 1248,6 | 1617,8 | 2461 n/s | 12,0 GB |
+
+**Custo por iteração:** Ray estável ~6,1–6,8 s/iter; Dask ~12,5–13,1 s/iter (média), com picos até ~23 s nas primeiras dezenas. Overhead de scheduling Dask + pressão de RAM explicam o fator ~2×.
+
+![Comparação Ray vs Dask](../results/figures/performance_comparison.png)
+
+![Tempo por iteração](../results/figures/iteration_times.png)
+
+#### Qualidade da clusterização
+
+| Estatística | Valor |
+|-------------|-------|
+| Comunidades | 590 |
+| Maior comunidade | 1 437 404 nós (46,8%) |
+| 2.ª maior | 1 372 668 nós (44,7%) |
+| Top 10 | 98,7% dos nós |
+| Mediana | 7 nós |
+| `converged` | false (100 iter) |
+
+Partição **fortemente desbalanceada** — típico de LPA síncrono em rede social densa sem pós-processamento.
+
+Com >3M nós, os JSON de partições **não incluem `node_ids`** (limite 50k). Visualização usa agregados (rank-size, top-K, cumulativa), não layout force-directed do grafo completo:
+
+![Rank-size run 1](../results/figures/clusterization_run1_rank_size.png)
+
+![Top 25 comunidades](../results/figures/clusterization_run2_top25.png)
+
+![Concentração cumulativa](../results/figures/clusterization_run3_cumulative.png)
+
+Regenerar figuras:
+
+```bash
+python scripts/generate_results_report.py
+```
+
+#### Lições operacionais
+
+| Problema | Mitigação |
+|----------|-----------|
+| Ray `/dev/shm` 64 MB | `shm_size: 4gb` no Docker |
+| Dask OOM após Ray | Reiniciar container; `LPA_WORKERS=4` |
+| `converged=false` | Normal em Orkut com 100 iter |
 
 ---
 
