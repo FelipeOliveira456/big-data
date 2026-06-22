@@ -154,12 +154,15 @@ class Graph:
     def degree_of(self, node_id: int) -> float:
         return self.out_degree_of(node_id)
 
-    def neighbor_indices(self, node_id: int) -> np.ndarray:
-        """Out-neighbor internal indices."""
-        idx = self.node_index(node_id)
+    def neighbor_indices_at(self, idx: int) -> np.ndarray:
+        """Out-neighbor internal indices by CSR row (``idx``), O(1) lookup."""
         start = int(self.indptr[idx])
         end = int(self.indptr[idx + 1])
         return self.neighbors[start:end]
+
+    def neighbor_indices(self, node_id: int) -> np.ndarray:
+        """Out-neighbor internal indices by external node id."""
+        return self.neighbor_indices_at(self.node_index(node_id))
 
     @classmethod
     def from_nodes(cls, node_ids: list[int] | np.ndarray) -> Graph:

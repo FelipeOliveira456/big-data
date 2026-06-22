@@ -69,7 +69,7 @@ Referência: Raghavan, Albert & Kumara (2007).
 ### Critério de parada
 
 - Convergência quando **nenhum nó muda de rótulo** numa iteração, ou
-- `max_iter` atingido (padrão **50**).
+- `max_iter` atingido (padrão **30**).
 
 Não há número inicial de clusters *K* — o LPA descobre comunidades pelo consenso local.
 
@@ -362,7 +362,7 @@ Com `--append`, reutiliza o stamp da run anterior (útil no Docker quando Ray e 
 | `graph_raw_path` / `GRAPH_RAW_PATH` | `data/raw/soc-pokec-relationships.txt` | Ficheiro SNAP |
 | `dataset_slug` | `pokec` | Prefixo nos nomes de partição |
 | `seed` / `SEED` | `42` | Semente base (amostra + LPA) |
-| `lpa_max_iter` / `LPA_MAX_ITER` | `50` | Máximo de iterações |
+| `lpa_max_iter` / `LPA_MAX_ITER` | `30` | Máximo de iterações |
 | `lpa_chunk_divisor` / `LPA_CHUNK_DIVISOR` | auto (CPUs) | Número de chunks por iteração |
 | `LPA_WORKERS` | — | Fixa workers e chunk divisor |
 | `ray_num_cpus` / `RAY_NUM_CPUS` | auto | CPUs Ray (local) |

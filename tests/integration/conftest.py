@@ -62,7 +62,7 @@ def integration_workspace(integration_graph_path: Path) -> IntegrationWorkspace:
         dataset_slug=DATASET_SLUG,
         reports_dir=benchmark_dir,
         seed=SEED,
-        lpa_max_iter=50,
+        lpa_max_iter=30,
         lpa_chunk_divisor=12,
         ray_num_cpus=3,
         dask_n_workers=3,

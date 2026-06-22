@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 RAW_DIR="data/raw"
 OUT="$RAW_DIR/soc-pokec-relationships.txt"
-URL="https://snap.stanford.edu/data/soc-Pokec/soc-pokec-relationships.txt.gz"
+URL="https://snap.stanford.edu/data/soc-pokec-relationships.txt.gz"
 
 mkdir -p "$RAW_DIR"
 if [[ -f "$OUT" ]]; then

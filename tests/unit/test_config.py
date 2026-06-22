@@ -23,7 +23,7 @@ def test_load_config_defaults(monkeypatch):
     monkeypatch.setattr(os, "cpu_count", lambda: 4)
     cfg = load_config(Path("/nonexistent/config.yaml"))
     assert cfg.seed == 42
-    assert cfg.lpa_max_iter == 50
+    assert cfg.lpa_max_iter == 30
     assert cfg.lpa_chunk_divisor == 4
     assert cfg.reports_dir == Path("reports")
     assert cfg.dataset_slug == "pokec"

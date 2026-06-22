@@ -4,7 +4,7 @@ graph_raw_path: data/raw/soc-pokec-relationships.txt
 dataset_slug: pokec
 reports_dir: reports
 seed: 42
-lpa_max_iter: 50
+lpa_max_iter: 30
 
 # null = auto from CPU count (override with LPA_WORKERS or LPA_CHUNK_DIVISOR)
 lpa_chunk_divisor: null

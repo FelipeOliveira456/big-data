@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 import numpy as np
+from numba import njit, types
+from numba.typed import Dict
 
 from graph.graph import Graph
 from lpa_core.worker_memory import sample_worker_peak, worker_host_id
@@ -104,6 +106,42 @@ def shuffled_node_chunks(
     return _make_chunks(order, chunk_divisor)
 
 
+@njit(cache=True)
+def _vote_kernel(
+    chunk_indices: np.ndarray,
+    indptr: np.ndarray,
+    neighbors: np.ndarray,
+    labels: np.ndarray,
+    out: np.ndarray,
+) -> None:
+    for pos in range(len(chunk_indices)):
+        idx = chunk_indices[pos]
+        start = indptr[idx]
+        end = indptr[idx + 1]
+        if start == end:
+            out[pos] = labels[idx]
+            continue
+        best_label = labels[idx]
+        best_count = np.int64(0)
+        votes = Dict.empty(key_type=types.int64, value_type=types.int64)
+        for k in range(start, end):
+            lbl = labels[neighbors[k]]
+            cnt = votes.get(lbl, 0) + 1
+            votes[lbl] = cnt
+            if cnt > best_count or (cnt == best_count and lbl < best_label):
+                best_count = cnt
+                best_label = lbl
+        out[pos] = best_label
+
+
+_warmup_idx = np.zeros(1, dtype=np.int64)
+_warmup_iptr = np.array([0, 0], dtype=np.int64)
+_warmup_nbr = np.empty(0, dtype=np.int64)
+_warmup_lbl = np.zeros(1, dtype=np.int64)
+_warmup_out = np.empty(1, dtype=np.int64)
+_vote_kernel(_warmup_idx, _warmup_iptr, _warmup_nbr, _warmup_lbl, _warmup_out)
+
+
 def lpa_iteration_chunk(
     chunk_indices: np.ndarray,
     graph: Graph,
@@ -111,27 +149,13 @@ def lpa_iteration_chunk(
 ) -> np.ndarray:
     """Return new labels for ``chunk_indices`` from a frozen global snapshot."""
     out = np.empty(len(chunk_indices), dtype=np.int64)
-    for pos, idx in enumerate(chunk_indices):
-        idx = int(idx)
-        current = int(labels_snapshot[idx])
-        node = int(graph.node_ids[idx])
-        nbr_idxs = graph.neighbor_indices(node)
-        if nbr_idxs.size == 0:
-            out[pos] = current
-            continue
-
-        votes: dict[int, int] = {}
-        for nbr_idx in nbr_idxs:
-            label = int(labels_snapshot[int(nbr_idx)])
-            votes[label] = votes.get(label, 0) + 1
-
-        if not votes:
-            out[pos] = current
-            continue
-
-        max_vote = max(votes.values())
-        best = min(label for label, vote in votes.items() if vote == max_vote)
-        out[pos] = best
+    _vote_kernel(
+        chunk_indices.astype(np.int64, copy=False),
+        graph.indptr,
+        graph.neighbors,
+        labels_snapshot.astype(np.int64, copy=False),
+        out,
+    )
     return out
 
 
@@ -239,7 +263,7 @@ def count_label_changes(labels: np.ndarray, snapshot: np.ndarray) -> int:
 
 def run_lpa_sequential(
     graph: Graph,
-    max_iter: int = 50,
+    max_iter: int = 30,
     seed: int = 42,
     log_fn: Callable[[str], None] | None = None,
 ) -> LpaResult:
