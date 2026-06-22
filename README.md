@@ -51,20 +51,21 @@ Algoritmos **sequenciais** em memória tornam-se lentos; daí **paralelizar** o 
 
 ## A ideia: Label Propagation (LPA)
 
-O **Label Propagation** (Raghavan et al., 2007) é um algoritmo **quase linear**, sem fixar o número de clusters *K*:
+O **Label Propagation** (Raghavan et al., 2007) detecta comunidades só com a topologia do grafo — sem fixar *K* nem optimizar uma função global:
 
-1. Cada nó começa com um **rótulo** (inicialmente derivado do seu id, com permutação por `seed`).
-2. Em cada **iteração**, cada nó olha para os **rótulos dos vizinhos** e adopta o mais frequente.
-3. Repete até **ninguém mudar** (convergência) ou atingir `max_iter` (default **100**).
+1. Cada nó começa com um **rótulo único** (no nosso código: derivado do `node_id`, com permutação por `seed`).
+2. A cada **iteração**, cada nó adopta o rótulo **mais frequente entre os vizinhos** (empate → menor rótulo).
+3. Repete até **ninguém mudar** ou atingir `max_iter` (default **100**).
 
-A actualização é **síncrona**: todos leem o snapshot do início da iteração e escrevem no fim — essencial para resultados reproduzíveis e comparáveis entre Ray e Dask.
+Grupos densamente ligados convergem rapidamente para o mesmo rótulo; regiões esparsas separam comunidades. A actualização é **síncrona** (snapshot no início da iteração) para comparar Ray e Dask de forma justa.
 
 <p align="center">
-  <img src="docs/assets/lpa-concept.svg" alt="Label Propagation: nós votam no rótulo majoritário dos vizinhos" width="720"/>
+  <img src="docs/assets/lpa-raghavan-karate-club.png" alt="Três partições LPA no karate club de Zachary (Raghavan et al. 2007, Fig. 4)" width="520"/>
+  <br/>
+  <sub>Figura do artigo original (Raghavan et al., <em>Phys. Rev. E</em> 2007): LPA no karate club de Zachary — exemplo clássico de comunidades emergentes.</sub>
 </p>
 
-**Empate:** escolhe-se o **menor rótulo** (regra determinística).  
-**Qualidade final:** mede-se **modularidade Q** (Blondel et al., 2008) sobre a partição obtida.
+**Qualidade final:** modularidade **Q** (Blondel et al., 2008) sobre a partição obtida.
 
 ```mermaid
 sequenceDiagram
@@ -128,49 +129,36 @@ Campanha **`20260622T005654`** — VM Docker, **6 vCPUs**, **~16 GB RAM**, **3,0
 
 ### Resumo
 
-| Métrica | Ray (3/3) | Dask (2/3) | Ray / Dask |
-|---------|-----------|----------|------------|
-| Tempo algoritmo (média) | **649 s** ± 13 | 1281 s ± 32 | **~2,0×** |
-| Throughput | **4704 nós/s** | 2400 nós/s | **~2,0×** |
+| Métrica | Ray (3/3) | Dask (3/3*) | Ray / Dask |
+|---------|-----------|-------------|------------|
+| Tempo algoritmo (média) | **649 s** ± 13 | 1298 s ± 36 | **~2,0×** |
+| Throughput | **4704 nós/s** | 2368 nós/s | **~2,0×** |
 | RSS pico (`peak_process_tree_rss_mb`) | **10,9 GB** | 12,0 GB | ~10% menos |
-| Comunidades | 590 | 590 (runs OK) | **idênticas** |
+| Comunidades | 590 | 590 | **idênticas** |
 
-Ray completou as 3 runs; Dask **run 1 falhou** (worker OOM >95% de ~2,6 GiB) após as runs Ray na mesma sessão. Num teste Dask isolado (`030138`) a run completou com a mesma partição.
+\* **Dask run 1 (seed 42)** completou numa **execução isolada** (`20260622T030138`, 1333 s). Na campanha mista Ray→Dask (`005654`), a run 1 falhou por **OOM** — houve **2 falhas** no total (também `024351`). Runs 2–3 do Dask vêm da campanha principal.
 
-**Partição:** Ray e Dask (quando terminam) produzem a **mesma distribuição de comunidades** — comparação de **runtime**, não de algoritmo diferente.
+**Partição:** Ray e Dask produzem a **mesma distribuição de comunidades** quando terminam — comparação de **runtime**, não de algoritmo diferente.
 
 ### Tempos por run
 
 | Run | Seed | Ray algo | Dask algo | Notas |
 |-----|------|----------|-----------|-------|
-| 1 | 42 | 667 s | **FALHOU** | Dask OOM |
+| 1 | 42 | 667 s | 1333 s* | *Dask: run isolada; mista falhou OOM |
 | 2 | 43 | 637 s | 1313 s | |
 | 3 | 44 | 642 s | 1249 s | |
 
-Carga do grafo ~362 s (cache quente entre runs). Ray ~**6,4 s/iter**; Dask ~**12,5 s/iter** (overhead de scheduling + pressão de RAM).
+Carga do grafo ~362 s (cache quente). Ray ~**6,4 s/iter**; Dask ~**12,5 s/iter**.
 
 ### Clusterização (590 comunidades)
 
-| Estatística | Valor |
-|-------------|-------|
-| Maior comunidade | 1,44M nós (46,8%) |
-| 2.ª maior | 1,37M nós (44,7%) |
-| Top 10 comunidades | 98,7% dos nós |
-| `converged` | false (100 iter) |
-
-Com **3M+ nós** não se desenha o grafo inteiro — usamos **rank-size**, **top-K** e **curva cumulativa** ([baseline para grafos grandes](results/REPORT.md#42-visualização-3-runs)).
+Duas mega-comunidades cobrem ~91% dos nós; `converged=false` em 100 iter (normal no Orkut).
 
 <p align="center">
-  <img src="results/figures/performance_comparison.png" alt="Ray vs Dask: tempo, throughput e memória" width="720"/>
+  <img src="results/figures/performance_comparison.png" alt="Ray vs Dask: tempo, throughput e memória (Dask run 1 hachurada = isolada)" width="720"/>
 </p>
 
-<p align="center">
-  <img src="results/figures/clusterization_run1_rank_size.png" alt="Distribuição rank-size das comunidades" width="480"/>
-  &nbsp;
-  <img src="results/figures/clusterization_run2_top25.png" alt="Top 25 comunidades" width="480"/>
-</p>
-
-Regenerar figuras: `python scripts/generate_results_report.py` · Detalhe completo: **[results/REPORT.md](results/REPORT.md)** · Secção técnica: **[§11 docs](docs/DOCUMENTACAO_PROJETO.md#11-benchmark-e-relatórios)**
+Regenerar figuras: `python scripts/generate_results_report.py` · Detalhe: **[results/REPORT.md](results/REPORT.md)** · **[§11 docs](docs/DOCUMENTACAO_PROJETO.md#11-benchmark-e-relatórios)**
 
 ---
 

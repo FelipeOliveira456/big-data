@@ -73,6 +73,12 @@ Referência: Raghavan, Albert & Kumara (2007).
 
 Não há número inicial de clusters *K* — o LPA descobre comunidades pelo consenso local.
 
+<p align="center">
+  <img src="assets/lpa-raghavan-karate-club.png" alt="Partições LPA no karate club (Raghavan et al. 2007, Fig. 4)" width="480"/>
+  <br/>
+  <sub>Raghavan et al., <em>Phys. Rev. E</em> 76, 036106 (2007) — exemplo clássico no karate club de Zachary.</sub>
+</p>
+
 ### Modularidade Q
 
 Após as iterações, calcula-se **Q** (Blondel et al., 2008) sobre a partição final:
@@ -354,16 +360,16 @@ Campanha de referência **`20260622T005654`** (VM Docker, 6 vCPUs, ~16 GB RAM, 3
 
 #### Resumo executivo
 
-| Métrica | Ray (3/3 OK) | Dask (2/3 OK) | Razão Ray/Dask |
-|---------|--------------|---------------|----------------|
-| Tempo médio do algoritmo | **648,8 s** ± 13,3 | 1280,9 s ± 32,2 | **~2,0×** |
-| Throughput | **4704 nós/s** ± 96 | 2400 nós/s ± 60 | **~2,0×** |
-| RSS pico (`peak_process_tree_rss_mb`) | **10,9 GB** ± 0,1 | 12,0 GB ± 0,1 | ~10% menos RAM |
-| Comunidades finais | 590 | 590 (runs OK) | **idênticas** |
+| Métrica | Ray (3/3) | Dask (3/3*) | Razão Ray/Dask |
+|---------|-----------|-------------|----------------|
+| Tempo médio do algoritmo | **648,8 s** ± 13,3 | 1298 s ± 36 | **~2,0×** |
+| Throughput | **4704 nós/s** ± 96 | 2368 nós/s ± 67 | **~2,0×** |
+| RSS pico (`peak_process_tree_rss_mb`) | **10,9 GB** ± 0,1 | 11,7 GB ± 0,1 | ~7% menos RAM |
+| Comunidades finais | 590 | 590 | **idênticas** |
 
-Ray entregou **100% de sucesso**; Dask run 1 falhou por **OOM do worker** (>95% do budget ~2,6 GiB/worker) após stress de memória das 3 runs Ray. Campanha Dask isolada `20260622T030138` completou com sucesso (1333 s algo, mesma partição).
+\* **Dask run 1 (seed 42):** sucesso na campanha isolada `20260622T030138` (1333 s). Na campanha mista `005654`, a run 1 **falhou por OOM** — **2 falhas** no total (também `024351`). O gráfico usa a run isolada para run 1 (barra hachurada).
 
-As partições finais são **equivalentes** entre Ray runs 1–3, Dask runs 2–3 e entre backends — inicialização LPA determinística por `node_id`.
+As partições finais são **equivalentes** entre todas as runs bem-sucedidas — inicialização LPA determinística por `node_id`.
 
 #### Desempenho por run
 
@@ -372,11 +378,13 @@ As partições finais são **equivalentes** entre Ray runs 1–3, Dask runs 2–
 | 1 | 42 | Ray | 667,4 | 1035,6 | 4604 n/s | 11,1 GB |
 | 2 | 43 | Ray | 637,4 | 1004,3 | 4820 n/s | 10,8 GB |
 | 3 | 44 | Ray | 641,6 | 1008,2 | 4789 n/s | 10,8 GB |
-| 1 | 42 | Dask | — | **FALHOU** | — | OOM |
+| 1 | 42 | Dask | 1333,4* | 1682,5* | 2304 n/s | 11,9 GB |
 | 2 | 43 | Dask | 1313,1 | 1682,0 | 2340 n/s | 11,9 GB |
 | 3 | 44 | Dask | 1248,6 | 1617,8 | 2461 n/s | 12,0 GB |
 
-**Custo por iteração:** Ray estável ~6,1–6,8 s/iter; Dask ~12,5–13,1 s/iter (média), com picos até ~23 s nas primeiras dezenas. Overhead de scheduling Dask + pressão de RAM explicam o fator ~2×.
+\* Run isolada (`030138`), não a tentativa OOM da campanha mista.
+
+**Custo por iteração:** Ray ~6,1–6,8 s/iter; Dask ~12,5–13,3 s/iter (média), com picos até ~23 s.
 
 ![Comparação Ray vs Dask](../results/figures/performance_comparison.png)
 
@@ -390,24 +398,13 @@ As partições finais são **equivalentes** entre Ray runs 1–3, Dask runs 2–
 | Maior comunidade | 1 437 404 nós (46,8%) |
 | 2.ª maior | 1 372 668 nós (44,7%) |
 | Top 10 | 98,7% dos nós |
-| Mediana | 7 nós |
 | `converged` | false (100 iter) |
 
-Partição **fortemente desbalanceada** — típico de LPA síncrono em rede social densa sem pós-processamento.
+Partição **fortemente desbalanceada** — típico de LPA em rede social densa. Com >3M nós, os JSON **não incluem `node_ids`** (limite 50k).
 
-Com >3M nós, os JSON de partições **não incluem `node_ids`** (limite 50k). Visualização usa agregados (rank-size, top-K, cumulativa), não layout force-directed do grafo completo:
+Gera `performance_comparison.png`, `iteration_times.png` e `convergence_changed_nodes.png`.
 
-![Rank-size run 1](../results/figures/clusterization_run1_rank_size.png)
-
-![Top 25 comunidades](../results/figures/clusterization_run2_top25.png)
-
-![Concentração cumulativa](../results/figures/clusterization_run3_cumulative.png)
-
-Regenerar figuras:
-
-```bash
-python scripts/generate_results_report.py
-```
+Dask run 1 usa métricas da campanha isolada `20260622T030138` (sucesso); a nota no gráfico indica as 2 falhas OOM na campanha mista.
 
 #### Lições operacionais
 
