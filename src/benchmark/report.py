@@ -26,6 +26,64 @@ def _loc_count(glob_pattern: str) -> dict[str, int]:
     return counts
 
 
+def _has_workers_column(rows: list[dict[str, str]]) -> bool:
+    return bool(rows) and "workers_requested" in rows[0]
+
+
+def _mean(values: list[float]) -> float:
+    return statistics.mean(values) if values else 0.0
+
+
+def _scalability_pivot(
+    rows: list[dict[str, str]],
+    *,
+    approach: str,
+    value_key: str,
+    scale: float = 1.0,
+) -> tuple[list[str], list[list[str]]]:
+    filtered = [
+        r
+        for r in rows
+        if r.get("approach") == approach and r.get("status") == "success"
+    ]
+    if not filtered:
+        return [], []
+
+    fractions = sorted({r["fraction_pct"] for r in filtered}, key=float)
+    workers = sorted(
+        {r.get("workers_requested", "?") for r in filtered},
+        key=lambda x: float(x) if x not in ("", "?") else -1.0,
+    )
+    grouped: dict[tuple[str, str], list[float]] = defaultdict(list)
+    for r in filtered:
+        grouped[(r["fraction_pct"], r.get("workers_requested", "?"))].append(
+            float(r.get(value_key) or 0) * scale
+        )
+
+    header = ["Fração %", *workers]
+    table: list[list[str]] = []
+    for frac in fractions:
+        row = [frac]
+        for w in workers:
+            vals = grouped.get((frac, w), [])
+            row.append(f"{_mean(vals):.1f}" if vals else "—")
+        table.append(row)
+    return header, table
+
+
+def _render_pivot_table(header: list[str], rows: list[list[str]]) -> list[str]:
+    if not header:
+        return []
+    sep = "|" + "|".join(["---"] * len(header)) + "|"
+    lines = [
+        "| " + " | ".join(header) + " |",
+        sep,
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(row) + " |")
+    return lines
+
+
 def generate_report(input_csv: Path, output_md: Path) -> Path:
     rows: list[dict[str, str]] = []
     with input_csv.open(encoding="utf-8") as f:
@@ -129,6 +187,63 @@ def generate_report(input_csv: Path, output_md: Path) -> Path:
 
     ray_loc = sum(_loc_count("src/ray_impl/**/*.py").values())
     dask_loc = sum(_loc_count("src/dask_impl/**/*.py").values())
+
+    if _has_workers_column(rows):
+        lines.extend(
+            [
+                "",
+                "## Escalabilidade: Throughput por Fração × Workers",
+                "",
+                "Throughput médio (nós/s) por combinação. "
+                "Valores de `algorithm_time_s` excluem BFS de amostragem "
+                "(frações parciais usam artefacto pré-construído).",
+                "",
+            ]
+        )
+        for approach in ("ray", "dask"):
+            header, table = _scalability_pivot(
+                success, approach=approach, value_key="throughput_nodes_per_s"
+            )
+            if table:
+                lines.append(f"### {approach.capitalize()}")
+                lines.append("")
+                lines.extend(_render_pivot_table(header, table))
+                lines.append("")
+
+        lines.extend(
+            [
+                "## Escalabilidade: Memória por Fração × Workers",
+                "",
+                "Pico RSS total (GB) = `peak_process_tree_rss_mb` / 1024.",
+                "",
+            ]
+        )
+        for approach in ("ray", "dask"):
+            header, table = _scalability_pivot(
+                success,
+                approach=approach,
+                value_key="peak_process_tree_rss_mb",
+                scale=1 / 1024,
+            )
+            if table:
+                lines.append(f"### {approach.capitalize()}")
+                lines.append("")
+                lines.extend(_render_pivot_table(header, table))
+                lines.append("")
+
+        lines.extend(
+            [
+                "## Nota: seeds e partições LPA",
+                "",
+                "O LPA distribuído síncrono (batch snapshot) produz **partições "
+                "idênticas** independentemente do seed LPA: o desempate é "
+                "determinístico e todos os chunks leem do mesmo snapshot por "
+                "iteração. Runs com seeds distintas medem variabilidade "
+                "**temporal** (tempo/memória), não variabilidade algorítmica.",
+                "",
+            ]
+        )
+
     lines.extend(
         [
             "",

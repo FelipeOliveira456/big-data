@@ -1,4 +1,4 @@
-"""Benchmark orchestration: runs per approach × fraction."""
+"""Benchmark orchestration: runs per approach × fraction × workers."""
 
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ from benchmark.run_log import (
 )
 from config import AppConfig, effective_dask_workers, effective_ray_cpus, load_config
 from graph.graph import Graph
-from preprocessing.graph_artifact import is_graph_artifact, load_graph_artifact
-from preprocessing.load_graph import load_graph_from_snap
+from preprocessing.fraction_artifacts import load_fraction_for_benchmark
+from preprocessing.graph_artifact import is_graph_artifact
 from ray_impl.lpa_ray import run_lpa_ray
 
 CSV_HEADER = [
@@ -55,6 +55,8 @@ CSV_HEADER = [
     "communities_json",
     "vm_peaks_json",
     "peak_cluster_rss_mb",
+    "workers_requested",
+    "workers_actual",
 ]
 
 DEFAULT_APPROACHES = ("ray", "dask")
@@ -86,6 +88,8 @@ class BenchmarkRow:
     communities_json: str
     vm_peaks_json: str
     peak_cluster_rss_mb: float
+    workers_requested: int = 0
+    workers_actual: int = 0
 
 
 def _shutdown_ray() -> None:
@@ -158,6 +162,8 @@ def _row_from_result(
     reports_dir: Path,
     run_stamp: str | None,
     graph_load_time_s: float,
+    *,
+    workers_requested: int,
 ) -> BenchmarkRow:
     part_summary, communities_json, vm_peaks, cluster_peak = _save_partition(
         reports_dir,
@@ -196,6 +202,8 @@ def _row_from_result(
         communities_json=communities_json,
         vm_peaks_json=json.dumps(vm_peaks),
         peak_cluster_rss_mb=cluster_peak,
+        workers_requested=workers_requested,
+        workers_actual=res.num_workers,
     )
 
 
@@ -209,6 +217,8 @@ def _run_approach(
     reports_dir: Path,
     run_stamp: str | None,
     seed: int,
+    *,
+    workers_requested: int,
 ) -> BenchmarkRow:
     if approach == "ray":
 
@@ -253,6 +263,48 @@ def _run_approach(
         reports_dir,
         run_stamp,
         graph_load_time_s,
+        workers_requested=workers_requested,
+    )
+
+
+def _fail_row(
+    *,
+    approach: str,
+    fraction_pct: float,
+    run_index: int,
+    graph_load_time_s: float,
+    cfg: AppConfig,
+    run_seed: int,
+    exc: Exception,
+    workers_requested: int,
+) -> BenchmarkRow:
+    return BenchmarkRow(
+        approach=approach,
+        fraction_pct=fraction_pct,
+        run_index=run_index,
+        node_count=0,
+        graph_load_time_s=graph_load_time_s,
+        init_time_s=0.0,
+        algorithm_time_s=0.0,
+        total_time_s=0.0,
+        peak_memory_mb=0.0,
+        peak_driver_rss_mb=0.0,
+        peak_process_tree_rss_mb=0.0,
+        throughput_nodes_per_s=0.0,
+        num_communities=0,
+        num_levels=0,
+        max_iter=float(cfg.lpa_max_iter),
+        seed=run_seed,
+        converged=False,
+        status="failed",
+        error_message=str(exc),
+        level_times_json="[]",
+        partition_summary="",
+        communities_json="",
+        vm_peaks_json="{}",
+        peak_cluster_rss_mb=0.0,
+        workers_requested=workers_requested,
+        workers_actual=0,
     )
 
 
@@ -261,6 +313,7 @@ def run_benchmark_campaign(
     output_csv: Path,
     runs: int = 3,
     fractions: list[float] | None = None,
+    workers_list: list[int] | None = None,
     cfg: AppConfig | None = None,
     log_path: Path | None = None,
     run_stamp: str | None = None,
@@ -269,6 +322,7 @@ def run_benchmark_campaign(
 ) -> Path:
     cfg = cfg or load_config()
     fractions = fractions or [100.0]
+    effective_workers = workers_list or [cfg.lpa_chunk_divisor]
     selected = approaches or list(DEFAULT_APPROACHES)
     rows: list[BenchmarkRow] = []
     reports_dir = output_csv.parent
@@ -292,19 +346,20 @@ def run_benchmark_campaign(
             # Graph sampling uses cfg.seed once per fraction; run-to-run variance
             # in the benchmark comes from LPA seeds (resolve_benchmark_seeds), not
             # from resampling the subgraph on each run.
-            is_artifact = is_graph_artifact(graph_path)
-            if is_artifact:
+            if is_graph_artifact(graph_path):
                 print(f"[benchmark] loading fixture {graph_path} ...", flush=True)
+                from preprocessing.graph_artifact import load_graph_artifact
+
                 loaded = load_graph_artifact(graph_path)
             else:
-                print(f"[benchmark] loading SNAP {frac}% from {graph_path} ...", flush=True)
-                loaded = load_graph_from_snap(
+                loaded = load_fraction_for_benchmark(
                     graph_path,
                     fraction_pct=frac,
                     seed=cfg.seed,
+                    dataset_slug=cfg.dataset_slug,
                     directed=cfg.graph_directed,
                 )
-            frac_label = loaded.fraction_pct if is_artifact else frac
+            frac_label = loaded.fraction_pct if is_graph_artifact(graph_path) else frac
             print(
                 f"  {loaded.node_count:,} nodes, {loaded.edge_count:,} directed edges "
                 f"in {loaded.load_time_s:.1f}s",
@@ -315,78 +370,69 @@ def run_benchmark_campaign(
             )
             print(format_estimate_report(est), flush=True)
 
-            for approach in selected:
-                if approach not in runners:
-                    raise ValueError(f"Unknown approach: {approach}")
-                for run_idx in range(1, runs + 1):
-                    run_seed = seeds[run_idx - 1]
-                    label = f"fraction={frac_label}% run={run_idx} seed={run_seed}"
-                    if log_file is not None:
-                        write_log_section(log_file, approach, label)
-                    try:
+            for w in effective_workers:
+                cfg_w = replace(cfg, lpa_chunk_divisor=w)
+                for approach in selected:
+                    if approach not in runners:
+                        raise ValueError(f"Unknown approach: {approach}")
+                    for run_idx in range(1, runs + 1):
+                        run_seed = seeds[run_idx - 1]
+                        label = (
+                            f"fraction={frac_label}% workers={w} "
+                            f"run={run_idx} seed={run_seed}"
+                        )
                         if log_file is not None:
-                            with approach_log_capture(log_file, approach):
+                            write_log_section(log_file, approach, label)
+                        try:
+                            if log_file is not None:
+                                with approach_log_capture(log_file, approach):
+                                    row = _run_approach(
+                                        approach,
+                                        loaded.graph,
+                                        frac_label,
+                                        loaded.load_time_s,
+                                        cfg_w,
+                                        run_idx,
+                                        reports_dir,
+                                        run_stamp,
+                                        run_seed,
+                                        workers_requested=w,
+                                    )
+                            else:
                                 row = _run_approach(
                                     approach,
                                     loaded.graph,
                                     frac_label,
                                     loaded.load_time_s,
-                                    cfg,
+                                    cfg_w,
                                     run_idx,
                                     reports_dir,
                                     run_stamp,
                                     run_seed,
+                                    workers_requested=w,
                                 )
-                        else:
-                            row = _run_approach(
-                                approach,
-                                loaded.graph,
-                                frac_label,
-                                loaded.load_time_s,
-                                cfg,
-                                run_idx,
-                                reports_dir,
-                                run_stamp,
-                                run_seed,
+                            rows.append(row)
+                            if log_file is not None:
+                                write_log_summary(
+                                    log_file, approach, label, asdict(row)
+                                )
+                        except Exception as exc:  # noqa: BLE001
+                            _shutdown_ray()
+                            fail_row = _fail_row(
+                                approach=approach,
+                                fraction_pct=frac_label,
+                                run_index=run_idx,
+                                graph_load_time_s=loaded.load_time_s,
+                                cfg=cfg_w,
+                                run_seed=run_seed,
+                                exc=exc,
+                                workers_requested=w,
                             )
-                        rows.append(row)
-                        if log_file is not None:
-                            write_log_summary(
-                                log_file, approach, label, asdict(row)
-                            )
-                    except Exception as exc:  # noqa: BLE001
-                        _shutdown_ray()
-                        fail_row = BenchmarkRow(
-                            approach=approach,
-                            fraction_pct=frac_label,
-                            run_index=run_idx,
-                            node_count=0,
-                            graph_load_time_s=loaded.load_time_s,
-                            init_time_s=0.0,
-                            algorithm_time_s=0.0,
-                            total_time_s=0.0,
-                            peak_memory_mb=0.0,
-                            peak_driver_rss_mb=0.0,
-                            peak_process_tree_rss_mb=0.0,
-                            throughput_nodes_per_s=0.0,
-                            num_communities=0,
-                            num_levels=0,
-                            max_iter=float(cfg.lpa_max_iter),
-                            seed=run_seed,
-                            converged=False,
-                            status="failed",
-                            error_message=str(exc),
-                            level_times_json="[]",
-                            partition_summary="",
-                            communities_json="",
-                            vm_peaks_json="{}",
-                            peak_cluster_rss_mb=0.0,
-                        )
-                        rows.append(fail_row)
-                        if log_file is not None:
-                            write_log_summary(
-                                log_file, approach, label, asdict(fail_row)
-                            )
+                            rows.append(fail_row)
+                            if log_file is not None:
+                                write_log_summary(
+                                    log_file, approach, label, asdict(fail_row)
+                                )
     finally:
         _shutdown_ray()
         if log_file is not None:

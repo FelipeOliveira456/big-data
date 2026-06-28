@@ -8,7 +8,7 @@ cd /app
 : "${BENCHMARK_RUNS:=3}"
 : "${BENCHMARK_STAMP:=}"
 : "${BENCHMARK_SEEDS:=}"
-: "${LPA_WORKERS:=}"
+: "${BENCHMARK_WORKERS:=}"
 
 if [[ -z "$BENCHMARK_STAMP" ]]; then
   BENCHMARK_STAMP=$(date -u +%Y%m%dT%H%M%S)
@@ -38,12 +38,15 @@ run_benchmark() {
   [[ -n "$BENCHMARK_STAMP" ]] && stamp_args=(--run-stamp "$BENCHMARK_STAMP")
   local backend_flag
   backend_flag=$(benchmark_backend_flag "$backend")
+  local workers_flag=()
+  [[ -n "$BENCHMARK_WORKERS" ]] && workers_flag=(--workers "$BENCHMARK_WORKERS")
   python -m cli.main benchmark \
     --input "$GRAPH_RAW_PATH" \
     --fractions "$BENCHMARK_FRACTIONS" \
     --runs "$BENCHMARK_RUNS" \
     "${stamp_args[@]}" \
     ${backend_flag:+$backend_flag} \
+    "${workers_flag[@]}" \
     "${append_flag[@]}"
 }
 

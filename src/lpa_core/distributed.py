@@ -36,6 +36,14 @@ def run_lpa_distributed(
     Run distributed LPA with a backend-specific ``run_one_iteration`` hook.
 
     Returns ``(labels, iter_times, converged, worker_vm_peaks)``.
+
+    Note — seed determinism:
+        This implementation is *synchronous/batch*: all chunks read from the same
+        frozen ``snapshot`` before any label is updated.  The vote kernel breaks
+        ties by minimum label (deterministic).  Therefore ``seed`` only affects
+        chunk boundaries, not the algorithm outcome; runs with different seeds
+        produce identical partitions.  This is expected behaviour.  Seed variation
+        measures temporal variance, not algorithmic variance.
     """
     n = graph.num_nodes
     labels = graph.init_labels()

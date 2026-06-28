@@ -90,3 +90,24 @@ def test_lpa_orkut_pipeline(
         f"  Algo (s): {[round(float(r['algorithm_time_s']), 1) for r in rows]}\n"
         f"  Load (s): {[round(float(r['graph_load_time_s']), 3) for r in rows]}"
     )
+
+
+@pytest.mark.integration
+def test_lpa_workers_grid(integration_workspace: IntegrationWorkspace):
+    ws = integration_workspace
+    run_benchmark_campaign(
+        ws.graph_path,
+        ws.metrics_csv,
+        runs=1,
+        fractions=[ws.fraction_pct],
+        workers_list=[2, 4],
+        cfg=ws.cfg,
+        log_path=ws.run_log,
+        run_stamp=ws.run_stamp,
+        approaches=["ray", "dask"],
+    )
+    with ws.metrics_csv.open(encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 4
+    assert {int(r["workers_requested"]) for r in rows} == {2, 4}
+    assert all(r["status"] == "success" for r in rows)

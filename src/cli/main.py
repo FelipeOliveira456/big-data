@@ -20,13 +20,17 @@ from benchmark.paths import (
 )
 from benchmark.partitions import write_partition
 from benchmark.report import generate_report
-from config import AppConfig, effective_dask_workers, effective_ray_cpus, load_config
+from config import effective_dask_workers, effective_ray_cpus, load_config
 from preprocessing.load import load_graph
 from ray_impl.lpa_ray import run_lpa_ray
 
 
 def _parse_fractions(value: str) -> list[float]:
     return [float(x.strip()) for x in value.split(",") if x.strip()]
+
+
+def _parse_workers(value: str) -> list[int]:
+    return [int(x.strip()) for x in value.split(",") if x.strip()]
 
 
 def _load_graph_for_cli(
@@ -172,6 +176,7 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
         out,
         runs=args.runs,
         fractions=_parse_fractions(args.fractions),
+        workers_list=_parse_workers(args.workers) or None,
         cfg=cfg,
         log_path=log_out,
         run_stamp=stamp,
@@ -246,6 +251,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_bench.add_argument("--output-csv", type=str, default=None)
     p_bench.add_argument("--runs", type=int, default=3)
     p_bench.add_argument("--fractions", type=str, default="100")
+    p_bench.add_argument(
+        "--workers",
+        type=str,
+        default="",
+        help="Comma-separated worker counts, e.g. '2,4,6' (default: os.cpu_count())",
+    )
     p_bench.add_argument("--ray-only", action="store_true")
     p_bench.add_argument("--dask-only", action="store_true")
     p_bench.add_argument(

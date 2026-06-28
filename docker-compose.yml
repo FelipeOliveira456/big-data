@@ -9,7 +9,8 @@ services:
     environment:
       GRAPH_RAW_PATH: data/raw/soc-orkut-relationships.txt
       LPA_MAX_ITER: "100"
-      BENCHMARK_FRACTIONS: "100"
+      BENCHMARK_FRACTIONS: "1,10,100"
       BENCHMARK_RUNS: "3"
       BENCHMARK_BACKEND: both
-      # LPA_WORKERS: unset → uses container CPU count
+      BENCHMARK_WORKERS: "2,4,6"
+      # LPA_WORKERS: unset → uses container CPU count when BENCHMARK_WORKERS empty

@@ -16,6 +16,7 @@ data/raw/
 data/raw/*.sqlite
 data/preprocess.log
 data/artifacts/*.parquet
+data/artifacts/*.npz
 data/artifacts/*.meta.json
 reports/metrics_raw_*.csv
 reports/comparison_*.md

@@ -103,6 +103,7 @@ def test_cmd_report_and_benchmark(tmp_path: Path, monkeypatch):
                 fractions="100",
                 fraction=None,
                 seed=None,
+                workers="",
                 ray_only=False,
                 dask_only=False,
                 run_stamp=None,
@@ -148,6 +149,7 @@ def test_cmd_benchmark_append_reuses_latest_stamp(tmp_path: Path, monkeypatch):
             fractions="100",
             fraction=None,
             seed=None,
+            workers="",
             ray_only=False,
             dask_only=True,
             run_stamp=None,
@@ -157,6 +159,47 @@ def test_cmd_benchmark_append_reuses_latest_stamp(tmp_path: Path, monkeypatch):
     assert code == 0
     assert captured["stamp"] == "20260101T120000"
     assert captured["out"].endswith("metrics_raw_20260101T120000.csv")
+
+
+def test_parse_workers_valid():
+    from cli.main import _parse_workers
+
+    assert _parse_workers("2,4,6") == [2, 4, 6]
+
+
+def test_parse_workers_empty():
+    from cli.main import _parse_workers
+
+    assert _parse_workers("") == []
+
+
+def test_cmd_benchmark_passes_workers_list(tmp_path: Path, monkeypatch):
+    raw = tmp_path / "raw.txt"
+    raw.write_text("0 1\n", encoding="utf-8")
+    captured: dict = {}
+
+    def _fake_campaign(_path, out, **kwargs):
+        captured["workers_list"] = kwargs.get("workers_list")
+        return out
+
+    monkeypatch.setattr("benchmark.runner.run_benchmark_campaign", _fake_campaign)
+    code = cmd_benchmark(
+        Namespace(
+            input=str(raw),
+            output_csv=str(tmp_path / "m.csv"),
+            runs=1,
+            fractions="100",
+            fraction=None,
+            seed=None,
+            workers="2,4",
+            ray_only=False,
+            dask_only=False,
+            run_stamp=None,
+            append=False,
+        )
+    )
+    assert code == 0
+    assert captured["workers_list"] == [2, 4]
 
 
 def test_cmd_benchmark_rejects_both_flags(tmp_path: Path, capsys):
@@ -170,6 +213,7 @@ def test_cmd_benchmark_rejects_both_flags(tmp_path: Path, capsys):
             fractions="100",
             fraction=None,
             seed=None,
+            workers="",
             ray_only=True,
             dask_only=True,
             run_stamp=None,

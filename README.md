@@ -153,27 +153,70 @@ python -m cli.main report
 |---------|-----|-------|------|
 | `tests/integration/fixtures/orkut_0p1pct.npz` | 1.632 | ~9.774 | Sintético (smoke test). Com raw Orkut, `build_integration_fixture.sh` gera amostra real. |
 
-### VM — Orkut 100% (produção)
+### VM — benchmark completo via Docker Compose (recomendado)
+
+O pipeline **só corre em Docker** na VM de produção: download automático do Orkut (se faltar), grid de escalabilidade Ray+Dask, relatório Markdown. O container **termina sozinho** (`Exited (0)` = sucesso).
+
+**Requisitos:** VM com **6+ vCPUs**, **16+ GB RAM**, **~20 GB disco** (Orkut ~1,7 GB comprimido + artefactos BFS + relatórios).
 
 ```bash
+git clone <repo-url> big-data && cd big-data
+
+# pastas montadas no container (uid 1000)
 mkdir -p data/raw reports
 sudo chown -R 1000:1000 data reports
 
+# build + pipeline em background (várias horas no grid default)
 docker compose up --build -d
+
+# acompanhar logs até "report" no fim
 docker compose logs -f
+
+# quando parar: artefactos em reports/
+ls reports/metrics_raw_*.csv reports/comparison_*.md
 ```
 
-Requisitos: **16+ GB RAM**, **~15–20 GB disco**. Carga ~6 min; Ray ~11 min/run; Dask ~20 min/run.
+**O que o entrypoint faz** (`scripts/docker-entrypoint.sh`):
 
-**Só Dask, 1 run, seed 42:**
+1. Baixa `soc-orkut-relationships.txt` se `data/raw/` estiver vazio.
+2. Corre `benchmark` Ray (grid completo).
+3. Corre `benchmark` Dask com `--append` (mesmo stamp).
+4. Gera `comparison_<stamp>.md`.
+
+**Grid default** (`docker-compose.yml`): 3 frações × 3 workers × 2 backends × 3 runs = **54 execuções LPA** + relatório. Frações 1% e 10% geram `.npz` em `data/artifacts/` (gitignored) — reutilizados entre runs; **não** entram no tempo de algoritmo.
+
+| Variável | Default | Efeito |
+|----------|---------|--------|
+| `BENCHMARK_FRACTIONS` | `1,10,100` | 1%, 10%, 100% Orkut |
+| `BENCHMARK_WORKERS` | `2,4,6` | Workers por backend |
+| `BENCHMARK_RUNS` | `3` | Repetições por célula (tempo/RAM) |
+| `BENCHMARK_BACKEND` | `both` | `ray`, `dask` ou `both` |
+| `BENCHMARK_SEEDS` | `42,43,44` | Seeds LPA (partição igual entre elas) |
+| `LPA_MAX_ITER` | `100` | Teto de iterações |
+
+**Smoke test rápido** (minutos, fixture pequena — ver secção PC acima) ou grid reduzido na VM:
+
+```bash
+docker compose run --rm \
+  -e BENCHMARK_FRACTIONS=1 \
+  -e BENCHMARK_WORKERS=2 \
+  -e BENCHMARK_RUNS=1 \
+  -e BENCHMARK_BACKEND=both \
+  lpa
+```
+
+**Só um backend, 1 run:**
 
 ```bash
 docker compose run --rm \
   -e BENCHMARK_BACKEND=dask \
+  -e BENCHMARK_FRACTIONS=100 \
   -e BENCHMARK_RUNS=1 \
   -e BENCHMARK_SEEDS=42 \
   lpa
 ```
+
+**Limpar:** `docker compose down` (não apaga `reports/` nem `data/`).
 
 ---
 
@@ -205,9 +248,27 @@ Copiar `config.yaml.example` → `config.yaml` ou usar variáveis de ambiente.
 | `lpa_max_iter` / `LPA_MAX_ITER` | `100` | Teto de iterações |
 | `graph_directed` | `false` | `false` = undirected |
 | `lpa_chunk_divisor` / `LPA_WORKERS` | auto (CPUs) | Chunks = workers |
+| `BENCHMARK_FRACTIONS` | `100` | Frações CSV: `1,10,100` |
+| `BENCHMARK_WORKERS` | auto (CPUs) | Workers CSV: `2,4,6` |
 | `BENCHMARK_BACKEND` | `both` | `ray`, `dask`, `both` |
 | `BENCHMARK_RUNS` | `3` | Repetições |
 | `BENCHMARK_SEEDS` | `42,43,44` | Seeds LPA por run |
+
+### Seeds LPA e partições
+
+O LPA distribuído **síncrono** (batch snapshot) produz partições **idênticas** entre seeds — o desempate é determinístico. As 3 runs medem variabilidade **temporal**, não algorítmica.
+
+### Frações parciais (1%, 10%) e BFS
+
+Para frações &lt; 100%, o benchmark **pré-constrói um artefacto BFS** em `data/artifacts/` antes de cronometrar o LPA. O tempo de BFS **não entra** em `algorithm_time_s` — só a carga rápida do `.npz` aparece em `graph_load_time_s`.
+
+```
+data/artifacts/
+├── orkut_1pct.npz      # amostra BFS 1% (reutilizada entre runs)
+├── orkut_1pct.meta.json
+├── orkut_10pct.npz
+└── orkut_10pct.meta.json
+```
 
 ---
 
@@ -240,20 +301,7 @@ No log, `[ray][vm-peaks] host=1299MB` é o **maior worker** — não o total. Pr
 
 ## Docker
 
-O **entrypoint** (`scripts/docker-entrypoint.sh`) corre o pipeline e **termina** — `docker compose ps -a` com `Exited (0)` é sucesso.
-
-```bash
-docker compose up --build -d    # detached
-docker compose logs -f
-docker compose down
-```
-
-| Variável | Default |
-|----------|---------|
-| `BENCHMARK_FRACTIONS` | `100` |
-| `BENCHMARK_RUNS` | `3` |
-| `BENCHMARK_BACKEND` | `both` |
-| `LPA_MAX_ITER` | `100` |
+Resumo técnico do serviço `lpa` — **passo a passo completo em [VM — benchmark via Docker Compose](#vm--benchmark-completo-via-docker-compose-recomendado)**.
 
 Melhorias recomendadas no `docker-compose.yml`:
 
@@ -263,7 +311,7 @@ services:
     shm_size: 4gb    # Ray object store (default Docker = 64 MB)
 ```
 
-Se Dask falhar por RAM na 1ª run: `-e LPA_WORKERS=4`.
+Se Dask falhar por RAM com 100% e 2 workers: esperado — fica `status=failed` no CSV.
 
 ---
 
@@ -272,19 +320,37 @@ Se Dask falhar por RAM na 1ª run: `-e LPA_WORKERS=4`.
 ```bash
 python -m cli.main --help
 
-# Campanha completa
-python -m cli.main benchmark --input data/raw/soc-orkut-relationships.txt --fractions 100 --runs 3
+# Grid completo de escalabilidade (VM local, fora do Docker)
+PYTHONPATH=src python -m cli.main benchmark \
+  --input data/raw/soc-orkut-relationships.txt \
+  --fractions 1,10,100 \
+  --workers 2,4,6 \
+  --runs 3
+
+PYTHONPATH=src python -m cli.main report
+
+# Smoke test rápido (fixture 0,1%)
+PYTHONPATH=src python -m cli.main benchmark \
+  --input tests/integration/fixtures/orkut_0p1pct.npz \
+  --fractions 0.1 \
+  --workers 2,4 \
+  --runs 1
+
+# Campanha 100% só (comportamento anterior)
+PYTHONPATH=src python -m cli.main benchmark \
+  --input data/raw/soc-orkut-relationships.txt \
+  --fractions 100 --runs 3
 
 # Um backend
-python -m cli.main benchmark --input <path> --ray-only --runs 1
-python -m cli.main benchmark --input <path> --dask-only --runs 1
+PYTHONPATH=src python -m cli.main benchmark --input <path> --ray-only --runs 1
+PYTHONPATH=src python -m cli.main benchmark --input <path> --dask-only --runs 1
 
 # LPA avulso (JSON no terminal; não grava CSV)
-python -m cli.main lpa-ray  --input <path> --seed 42 --max-iter 100
-python -m cli.main lpa-dask --input <path> --seed 42 --max-iter 100
+PYTHONPATH=src python -m cli.main lpa-ray  --input <path> --seed 42 --max-iter 100
+PYTHONPATH=src python -m cli.main lpa-dask --input <path> --seed 42 --max-iter 100
 
 # Relatório
-python -m cli.main report --input-csv reports/metrics_raw_<stamp>.csv
+PYTHONPATH=src python -m cli.main report --input-csv reports/metrics_raw_<stamp>.csv
 ```
 
 ---

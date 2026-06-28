@@ -65,3 +65,52 @@ def test_generate_report(tmp_path: Path):
     assert "ray" in text
     assert "Execuções falhadas" in text
     assert "worker crash" in text
+
+
+def test_report_scalability_section(tmp_path: Path):
+    csv_path = tmp_path / "metrics_scalability.csv"
+    rows = [
+        {
+            "approach": "ray",
+            "fraction_pct": "1",
+            "run_index": "1",
+            "algorithm_time_s": "1.0",
+            "peak_process_tree_rss_mb": "1024",
+            "throughput_nodes_per_s": "1000",
+            "num_communities": "3",
+            "status": "success",
+            "workers_requested": "2",
+        },
+        {
+            "approach": "ray",
+            "fraction_pct": "1",
+            "run_index": "1",
+            "algorithm_time_s": "0.5",
+            "peak_process_tree_rss_mb": "2048",
+            "throughput_nodes_per_s": "2000",
+            "num_communities": "3",
+            "status": "success",
+            "workers_requested": "4",
+        },
+        {
+            "approach": "dask",
+            "fraction_pct": "10",
+            "run_index": "1",
+            "algorithm_time_s": "2.0",
+            "peak_process_tree_rss_mb": "4096",
+            "throughput_nodes_per_s": "500",
+            "num_communities": "4",
+            "status": "success",
+            "workers_requested": "2",
+        },
+    ]
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+
+    md_path = tmp_path / "report_scalability.md"
+    text = generate_report(csv_path, md_path).read_text(encoding="utf-8")
+    assert "Escalabilidade" in text
+    assert "2000.0" in text
+    assert "seeds e partições LPA" in text
