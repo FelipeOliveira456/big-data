@@ -10,6 +10,14 @@ Python 3.11 · Numba · Ray Core · Dask Distributed · Docker
 
 </div>
 
+| Secção | Conteúdo |
+|--------|----------|
+| [Resultados](#resultados) | 100%, 1%, 10% + PDF |
+| [Início rápido](#início-rápido) | Smoke 0,1% · Docker Compose |
+| [Dataset](#dataset) | Orkut / SNAP |
+| [Testes](#testes) | pytest |
+| [Estrutura](#estrutura) | Pastas do repo |
+
 ---
 
 ## O problema
@@ -121,6 +129,7 @@ sudo chown -R 1000:1000 data reports
 
 docker compose up --build -d
 docker compose logs -f
+# quando o container parar (Exited 0): reports/metrics_raw_<stamp>.csv e comparison_<stamp>.md
 ```
 
 **Grid default:** 3 frações (1%, 10%, 100%) × **6 workers** × Ray+Dask × **3 runs** = 18 execuções LPA + relatório.
